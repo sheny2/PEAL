@@ -1,0 +1,74 @@
+---
+title: "Project"
+author: "Yicheng Shen"
+date: "Nov 24, 2024"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = F, message = F)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "75%", fig.align = 'center')
+library(pda)
+library(lme4)
+```
+
+
+use long lp in lmm.profile
+control = lmerControl(optimizer="bobyqa"))
+```{r}
+final_results <- readRDS("final_results.rds") # long lp
+
+final_results %>%
+  pivot_longer(1:6, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot() + ylim(-0.00002, 0.00002)
+
+final_results %>%
+  pivot_longer(7:9, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.06, 0.06)
+```
+
+use short lp in lmm.profile
+control = lmerControl(optimizer="bobyqa"))
+```{r}
+final_results <- readRDS("final_resultsV2.rds") # Short lp
+
+final_results %>%
+  pivot_longer(1:6, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot() + ylim(-0.00002, 0.00002)
+
+final_results %>%
+  pivot_longer(7:9, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.06, 0.06)
+```
+
+use long lp in lmm.profile
+control = lmerControl(optimizer="Nelder_Mead"))
+
+```{r}
+final_results <- readRDS("final_resultsV3.rds") # long lp Nelder_Mead
+
+final_results %>%
+  pivot_longer(1:6, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.00002, 0.00002)
+
+final_results %>%
+  pivot_longer(7:9, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.06, 0.06)
+```
+
+
+use short lp in lmm.profile
+control = lmerControl(optimizer="Nelder_Mead"))
+
+```{r}
+final_results <- readRDS("final_resultsV4.rds") # short lp Nelder_Mead
+
+final_results %>%
+  pivot_longer(1:6, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.00002, 0.00002)
+
+final_results %>%
+  pivot_longer(7:9, names_to = "Diff", values_to = "Value") %>%
+  ggplot(aes(x = Diff, y = Value)) + geom_boxplot()+ ylim(-0.06, 0.06)
+```
+
