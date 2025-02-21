@@ -1,0 +1,560 @@
+---
+title: "Project"
+author: "Yicheng Shen"
+date: "Nov 24, 2024"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = F, message = F)
+knitr::opts_chunk$set(out.width = "75%", fig.align = 'center')
+ggplot2::theme_set(ggplot2::theme_bw())
+library(pda)
+library(lme4)
+library(tidyverse)
+```
+
+
+```{r}
+set.seed(123)
+library(lme4)
+dat <- expand.grid(visit = c(1,2,3), patient = c(1,2,3), hospital = c(1,2))
+dat$outcome <- rnorm(nrow(dat), 1.5, 0.2) + dat$patient + dat$hospital
+```
+
+```{r}
+lmm0 <- lmer(outcome ~ 1 + (1|patient), data = dat[1:9,])
+
+getME(lmm0, "Zt")
+
+getME(lmm0, "Z")
+
+getME(lmm0, "b")
+
+summary(lmm0)
+
+getME(lmm0, "Z") %*% getME(lmm0, "Zt")  + diag(1, nrow(dat[1:9,]))
+```
+
+
+```{r}
+lmm1 <- lmer(outcome ~ 1 + (1|hospital/patient), data = dat)
+getME(lmm1, "Zt")
+getME(lmm1, "Z")
+getME(lmm1, "b")
+
+summary(lmm1)
+
+getME(lmm1, "Z") %*% getME(lmm1, "Zt") + diag(1, nrow(dat))
+```
+
+
+
+
+```{r}
+G     <- 2  # Number of groups
+n_ind <- 10  # Number of individuals per group
+n_obs <- 3  # Measurements per individual
+
+N <- G * n_ind * n_obs  # Total number of observations
+
+# Fixed effects (true population values)
+beta_0 <- 2.0   # grand mean intercept
+beta_1 <- 1.0   # slope for x1
+beta_2 <- 0.5   # slope for x2
+sd_u0_group <- 1.0  
+sd_u0_ind   <- 1.0  
+sd_u1_ind   <- 0.5 
+sigma_error <- 1.0 
+
+# Create a data frame with indices
+sim_data <- expand.grid(
+  group_id = 1:G,
+  ind_id   = 1:n_ind,
+  obs_id   = 1:n_obs
+)
+
+# Generate covariates
+# For example, we can simulate them as random normal or uniform
+sim_data$x1 <- rnorm(nrow(sim_data), mean = 0, sd = 1)
+sim_data$x2 <- runif(nrow(sim_data), min = 0, max = 10)
+
+
+# Random intercepts for groups
+u0_group <- rnorm(G, mean = 0, sd = sd_u0_group)
+# Random intercepts for individuals (nested in group)
+# We'll have G*n_ind of these
+u0_ind   <- rnorm(G * n_ind, mean = 0, sd = sd_u0_ind)
+# Random slopes for x1 at individual level
+u1_ind   <- rnorm(G * n_ind, mean = 0, sd = sd_u1_ind)
+
+# Merge random intercepts/slopes into the data
+sim_data <- sim_data %>%
+  mutate(
+    # group-level intercept
+    u0g = u0_group[group_id],
+    # individual-level intercept
+    u0i = u0_ind[(group_id - 1)*n_ind + ind_id],
+    # individual-level slope
+    u1i = u1_ind[(group_id - 1)*n_ind + ind_id]
+  )
+
+
+sim_data <- sim_data %>%
+  mutate(
+    # linear predictor
+    lin_pred = beta_0 +
+      beta_1 * x1 +
+      beta_2 * x2 +
+      u0g +      # group intercept deviation
+      u0i +      # individual intercept deviation
+      u1i * x1,  # random slope for x1
+
+    # Add random noise
+    y = lin_pred + rnorm(n(), mean = 0, sd = sigma_error)
+  )
+
+
+
+# 'group_id/ind_id' expands to random intercept by group_id and by ind_id nested in group.
+# We also want a random slope for x1 at the individual level.
+
+model_lmer <- lmer(
+  y ~ x1 + x2 + 
+    (1|group_id) + 
+    (1 + x1|group_id:ind_id),
+  data = sim_data
+)
+
+summary(model_lmer)
+
+```
+
+
+
+
+
+
+
+# LMER
+
+```{r}
+# Parameters
+H <- 3  # Number of hospitals
+m <- 10   # Patients per hospital
+n <- 5   # Visits per patient
+
+beta <- 5  # Fixed effect coefficients
+sigma_u <- 3  # Hospital-level variance
+sigma_v <- 2  # Patient-level variance
+sigma_e <- 1  # Error variance
+```
+
+
+
+```{r}
+# Data storage
+data <- data.frame()
+
+# DGP
+# set.seed(123)  
+for (h in 1:H) {
+  u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+  for (i in 1:m) {
+    v_hi <- rnorm(1, mean = 0, sd = sigma_v)  # Random patient effect
+    for (j in 1:n) {
+      X_hij <- rnorm(1, mean = 0, sd = 1)  
+      epsilon_hij <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+      y_hij <- sum(X_hij * beta) + u_h + v_hi + epsilon_hij  # Outcome
+
+      data <- rbind(data, c(h, i, j, X_hij, y_hij))
+    }
+  }
+}
+
+# Add column names
+colnames(data) <- c("hospital", "patient", "visit", "X", "outcome")
+
+# Fit the model for three-level data
+three_lvl_lme <- lmer(outcome ~ X + (1 | hospital/patient), data = data)
+
+# Display the summary of the model
+summary(three_lvl_lme)
+as.data.frame(VarCorr(three_lvl_lme))
+```
+
+```{r}
+N = 100
+results <- data.frame(
+  simulation = 1:N,
+  beta_estimate = numeric(N),
+  beta_variance = numeric(N),
+  var_hospital = numeric(N),
+  var_patient = numeric(N),
+  var_residual = numeric(N)
+)
+
+for (t in 1:N) {
+  # Generate data
+  sim_data <- data.frame()
+
+  for (h in 1:H) {
+    u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+    for (i in 1:m) {
+      v_hi <- rnorm(1, mean = 0, sd = sigma_v)  # Random patient effect
+      for (j in 1:n) {
+        X_hij <- rnorm(1, mean = 0, sd = 1)  
+        epsilon_hij <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+        y_hij <- sum(X_hij * beta) + u_h + v_hi + epsilon_hij  # Outcome
+  
+        sim_data <- rbind(sim_data, c(h, i, j, X_hij, y_hij))
+      }
+    }
+  }
+  
+  colnames(sim_data) <- c("hospital", "patient", "visit", "X", "outcome")
+  model <- lmer(outcome ~ X + (1 | hospital/patient), data = sim_data)
+  
+  # Extract fixed effects estimates and variances
+  fixed_effects <- fixef(model)
+  fixed_effects_se <- sqrt(diag(vcov(model)))
+  
+  results[t, "beta_estimate"] <- fixed_effects["X"]
+  results[t, "beta_variance"] <- fixed_effects_se["X"]^2
+  
+  
+  # Extract variance components
+  var_comp <- as.data.frame(VarCorr(model))
+  results[t, "var_hospital"] <- var_comp$vcov[var_comp$grp == "hospital"]
+  results[t, "var_patient"] <- var_comp$vcov[var_comp$grp == "patient:hospital"]
+  results[t, "var_residual"] <- var_comp$vcov[var_comp$grp == "Residual"]
+}
+
+
+mean(results$beta_estimate)
+mean(results$beta_variance)
+mean(results$var_hospital)
+mean(results$var_patient)
+mean(results$var_residual)
+```
+
+
+
+```{r}
+data <- data.frame()
+set.seed(123)  
+for (h in 1:H) {
+  u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+  for (i in 1:m) {
+    X_hi <- rnorm(1, mean = 0, sd = 1)  # Covariates for the patient
+    epsilon_hi <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+    y_hi <- sum(X_hi * beta) + u_h + epsilon_hi  # Outcome
+    # Store in data frame
+    data <- rbind(data, c(h, i, X_hi, y_hi))
+  }
+}
+
+# Add column names
+colnames(data) <- c("hospital", "patient", "X", "outcome")
+
+# Fit the model for two-level data
+two_lvl_lme <- lmer(outcome ~ X + (1 | hospital), data = data)
+
+# Display the summary of the model
+summary(two_lvl_lme)
+```
+
+
+
+```{r}
+N = 100
+results <- data.frame(
+  simulation = 1:N,
+  beta_estimate = numeric(N),
+  beta_variance = numeric(N),
+  var_hospital = numeric(N),
+  var_residual = numeric(N)
+)
+
+for (t in 1:N) {
+  # Generate data
+  sim_data <- data.frame()
+
+  for (h in 1:H) {
+    u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+    for (i in 1:m) {
+      X_hi <- rnorm(1, mean = 0, sd = 1)  # Covariates for the patient
+      epsilon_hi <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+      y_hi <- sum(X_hi * beta) + u_h + epsilon_hi  # Outcome
+
+      sim_data <- rbind(sim_data, c(h, i, X_hi, y_hi))
+    }
+  }
+  
+  colnames(sim_data) <- c("hospital", "patient", "X", "outcome")
+  model <- lmer(outcome ~ X + (1 | hospital), data = sim_data)
+  
+
+  # Extract fixed effects estimates and variances
+  fixed_effects <- fixef(model)
+  fixed_effects_se <- sqrt(diag(vcov(model)))
+  
+  results[t, "beta_estimate"] <- fixed_effects["X"]
+  results[t, "beta_variance"] <- fixed_effects_se["X"]^2
+  
+  # Extract variance components
+  var_comp <- as.data.frame(VarCorr(model))
+  results[t, "var_hospital"] <- var_comp$vcov[var_comp$grp == "hospital"]
+  results[t, "var_residual"] <- var_comp$vcov[var_comp$grp == "Residual"]
+}
+
+
+mean(results$beta_estimate)
+mean(results$beta_variance)
+mean(results$var_hospital)
+mean(results$var_residual)
+```
+
+
+
+# USE PDA: 2 level
+
+
+```{r}
+# Parameters
+H <- 3  # Number of hospitals
+m <- 10   # Patients per hospital
+n <- 5   # Visits per patient
+
+beta0  <- 5
+beta1 <- 5  # Fixed effect coefficients
+sigma_u <- 3  # Hospital-level variance
+sigma_v <- 2  # Patient-level variance
+sigma_e <- 1  # Error variance
+```
+
+```{r}
+two_lvl_dat <- data.frame()
+set.seed(8848)  
+for (h in 1:H) {
+  u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+  for (i in 1:m) {
+    X_hi <- rnorm(1, mean = 0, sd = 1)  # Covariates for the patient
+    epsilon_hi <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+    y_hi <- beta0 + sum(X_hi * beta1) + u_h + epsilon_hi  # Outcome
+    # Store in data frame
+    two_lvl_dat <- rbind(two_lvl_dat, c(h, i, X_hi, y_hi))
+  }
+}
+
+# Add column names
+colnames(two_lvl_dat) <- c("site", "patient", "X", "outcome")
+two_lvl_lme <- lmer(outcome ~ X + (1 | site), data = two_lvl_dat, REML = F)
+summary(two_lvl_lme)
+```
+
+```{r}
+data_split <- split(two_lvl_dat, two_lvl_dat$site)
+
+## setup pda control
+control <- list(project_name = 'Sim',
+                step = 'initialize',
+                sites = c("1","2","3"),
+                heterogeneity = TRUE,
+                heterogeneity_effect = 'random',
+                model = 'DLM',
+                family = 'gaussian',
+                outcome = "outcome",
+                variables = c('X'), 
+                optim_maxit = 100,
+                lead_site = '1',
+                upload_date = as.character(Sys.time()) )
+
+ 
+## specify your working directory, default is the current working dir
+mydir <- getwd()   
+pda(site_id = '1', control = control, dir = mydir)
+# you now can see control.json in the working dir
+
+
+## DO NOT RUN: in actual collaboration, account/password for pda server will be assigned, thus:
+# pda(site_id = 'site1', control = control, uri = 'https://pda.one', secret='abc123')
+## you can also set your environment variables, and no need to specify them in pda:
+# Sys.setenv(PDA_USER = 'site1', PDA_SECRET = 'abc123', PDA_URI = 'https://pda.one')
+# pda(site_id = 'site1', control = control)
+
+
+## site3 communicate its AD: after review, enter "1" to allow tranferring AD 
+pda(site_id = '3', ipdata = data_split[[3]], dir=mydir)
+# you now can see site3_initialize.json in the working dir
+
+## site2 communicate its AD: after review, enter "1" to allow tranferring AD   
+pda(site_id = '2', ipdata = data_split[[2]], dir=mydir)
+# you now can see site2_initialize.json in the working dir
+
+## site1 communicate its AD: after review, enter "1" to allow tranferring AD   
+pda(site_id = '1', ipdata = data_split[[1]], dir=mydir)
+# you now can see site3_initialize.json in the working dir
+# all the AD are ready, control.json is also automatically updated to the next step
+
+```
+
+
+```{r}
+pda(site_id = '1', ipdata = data_split[[1]], dir=mydir)
+# you now can see site1_estimate.json in the working dir
+
+
+## get the estimated results
+config <- getCloudConfig(site_id = '1', dir=mydir)
+fit.dlmm <- pdaGet(name = '1_estimate', config = config)
+
+fit.dlmm
+```
+
+
+```{r}
+fit.pool = two_lvl_lme
+# fixed effects (intercept, age, sex, lab) and their sd 
+cbind(b.pool = round(summary(fit.pool)$coef[,1], 4),
+      b.dlmm = c(fit.dlmm$bhat),      
+      sd.pool = round(summary(fit.pool)$coef[,2], 4),  
+      sd.dlmm = fit.dlmm$sebhat)  
+
+# variance components (var of random intercepts, and random error)
+cbind(vc.pool=round(data.frame(summary(fit.pool)$varcor)$vcov, 4),
+      vc.dlmm=round(c(fit.dlmm$ Vhat, fit.dlmm$sigmahat^2),4) )
+
+# random intercepts (BLUP) of each sites
+cbind(u.pool = round(ranef(fit.pool)$site, 4),
+      u.dlmm = c(fit.dlmm$uhat))
+```
+
+
+
+
+
+# USE PDA: 3 level
+```{r}
+# Parameters
+H <- 20  # Number of hospitals
+m <- 100    # Patients per hospital
+n <- 5   # Visits per patient
+
+beta0  <- 5
+beta1 <- 5  # Fixed effect coefficients
+sigma_u <- 3  # Hospital-level variance
+sigma_v <- 2  # Patient-level variance
+sigma_e <- 1  # Error variance
+```
+
+
+
+```{r}
+# Data storage
+three_lvl_dat <- data.frame()
+
+# DGP
+# set.seed(123)  
+for (h in 1:H) {
+  u_h <- rnorm(1, mean = 0, sd = sigma_u)  # Random hospital effect
+  for (i in 1:m) {
+    v_hi <- rnorm(1, mean = 0, sd = sigma_v)  # Random patient effect
+    for (j in 1:n) {
+      X_hij <- rnorm(1, mean = 0, sd = 1)  
+      epsilon_hij <- rnorm(1, mean = 0, sd = sigma_e)  # Random error
+      y_hij <- beta0 + sum(X_hij * beta1) + u_h + v_hi + epsilon_hij  # Outcome
+
+      three_lvl_dat <- rbind(three_lvl_dat, c(h, i, j, X_hij, y_hij))
+    }
+  }
+}
+
+# Add column names
+colnames(three_lvl_dat) <- c("site", "patient", "visit", "X", "outcome")
+
+# Fit the model for three-level data
+three_lvl_lme <- lmer(outcome ~ X + (1 | site/patient), data = three_lvl_dat, REML = F)
+
+# Display the summary of the model
+summary(three_lvl_lme)
+```
+
+
+```{r}
+data_split <- split(three_lvl_dat, three_lvl_dat$site)
+
+## setup pda control
+control <- list(project_name = 'Sim',
+                step = 'initialize',
+                sites = c("1","2","3"),
+                heterogeneity = TRUE,
+                heterogeneity_effect = 'random',
+                model = 'DLM',
+                family = 'gaussian',
+                outcome = "outcome",
+                variables = c('X'), 
+                optim_maxit = 100,
+                lead_site = '1',
+                upload_date = as.character(Sys.time()) )
+
+ 
+## specify your working directory, default is the current working dir
+mydir <- getwd()   
+pda(site_id = '1', control = control, dir = mydir)
+# you now can see control.json in the working dir
+
+
+## DO NOT RUN: in actual collaboration, account/password for pda server will be assigned, thus:
+# pda(site_id = 'site1', control = control, uri = 'https://pda.one', secret='abc123')
+## you can also set your environment variables, and no need to specify them in pda:
+# Sys.setenv(PDA_USER = 'site1', PDA_SECRET = 'abc123', PDA_URI = 'https://pda.one')
+# pda(site_id = 'site1', control = control)
+
+
+## site3 communicate its AD: after review, enter "1" to allow tranferring AD 
+pda(site_id = '3', ipdata = data_split[[3]], dir=mydir)
+# you now can see site3_initialize.json in the working dir
+
+## site2 communicate its AD: after review, enter "1" to allow tranferring AD   
+pda(site_id = '2', ipdata = data_split[[2]], dir=mydir)
+# you now can see site2_initialize.json in the working dir
+
+## site1 communicate its AD: after review, enter "1" to allow tranferring AD   
+pda(site_id = '1', ipdata = data_split[[1]], dir=mydir)
+# you now can see site3_initialize.json in the working dir
+# all the AD are ready, control.json is also automatically updated to the next step
+
+```
+
+
+```{r}
+pda(site_id = '1', ipdata = data_split[[1]], dir=mydir)
+# you now can see site1_estimate.json in the working dir
+
+
+## get the estimated results
+config <- getCloudConfig(site_id = '1', dir=mydir)
+fit.dlmm <- pdaGet(name = '1_estimate', config = config)
+
+fit.dlmm
+```
+
+
+```{r}
+fit.pool = three_lvl_lme
+# fixed effects (intercept, age, sex, lab) and their sd 
+cbind(b.pool = round(summary(fit.pool)$coef[,1], 4),
+      b.dlmm = c(fit.dlmm$bhat),      
+      sd.pool = round(summary(fit.pool)$coef[,2], 4),  
+      sd.dlmm = fit.dlmm$sebhat)  
+
+# # variance components (var of random intercepts, and random error)
+# cbind(vc.pool=round(data.frame(summary(fit.pool)$varcor)$vcov, 4),
+#       vc.dlmm=round(c(fit.dlmm$ Vhat, fit.dlmm$sigmahat^2),4) )
+# 
+# # random intercepts (BLUP) of each sites
+# cbind(u.pool = round(ranef(fit.pool)$site, 4),
+#       u.dlmm = c(fit.dlmm$uhat))
+```
+
+
