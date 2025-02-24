@@ -1,4 +1,3 @@
-source("DLMM_engine3.R")
 library(doParallel)
 library(foreach)
 library(data.table)
@@ -10,12 +9,12 @@ cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 100
+N = 50
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:100, H) # of patients (1k to 3k later)
+m_hosp <- sample(50:70, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
@@ -42,7 +41,7 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
-  source("DLMM_engine3.R")
+  source("DLMM_engine3RI.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -164,8 +163,8 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 # saveRDS(beta_df, file = "beta_df.rds")
 # saveRDS(sigma_df, file = "sigma_df.rds")
-beta_df <- readRDS("beta_df.rds")
-sigma_df <- readRDS("sigma_df.rds")
+# beta_df <- readRDS("beta_df.rds")
+# sigma_df <- readRDS("sigma_df.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%

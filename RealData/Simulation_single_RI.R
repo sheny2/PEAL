@@ -3,7 +3,8 @@ library(lme4)
 library(MASS)  # For rmvnorm
 library(data.table)
 
-source("DLMM_engine3.R")
+
+source("DLMM_engine3RI.R")
 
 set.seed(12)
 
@@ -101,12 +102,13 @@ Z <- list()
 
 for(i in 1:H){
   count_mat = rearranged_data %>%
-  filter(site == i) %>%
-  group_by(site, patient) %>%
-  dplyr::summarise(n_hi = n(), .groups = 'drop')
+                    filter(site == i) %>%
+                    group_by(site, patient) %>%
+                    dplyr::summarise(n_hi = n(), .groups = 'drop')
 
-Z[[i]] <- (generate_Zhv_matrix(count_mat))
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
 }
+
 
 
 id.site <- rearranged_data$site
@@ -116,6 +118,7 @@ ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 
 
 # DLMM
+
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       id.site = NULL, weights = NULL,
                       pooled = F, reml = T,
@@ -149,10 +152,6 @@ points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 
-
-
-
-
 #
 # fit03.lmer <- lmer(Y ~ X1 + X2 + X3 + X4 + X5 + (1|site/patient),
 #                    data = rearranged_data,
@@ -181,3 +180,5 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 # lmm_sigma_e <- var_comp$sdcor[3]
 #
 # c(lmm_sigma_u, lmm_sigma_v, lmm_sigma_e)
+
+
