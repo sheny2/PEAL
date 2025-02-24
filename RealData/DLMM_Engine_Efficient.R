@@ -99,7 +99,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     pzh <- ncol(ShZ)
     par_h <- c(par[1], par[1 + h])
     V <- diag(c(par_h[1], rep(par_h[2], (pzh - 1))), pzh)
-
+    # V is diagonal
     Vinv <- diag(1/diag(V))
 
     # Compute the log-determinant using the Cholesky factorization

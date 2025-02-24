@@ -9,12 +9,12 @@ cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 50
+N = 70
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:70, H) # of patients (1k to 3k later)
+m_hosp <- sample(120:150, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
@@ -41,7 +41,8 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
-  source("DLMM_engine3RI.R")
+  # source("DLMM_Engine_Efficient.R")
+  source("DLMM_Engine_Efficient.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
