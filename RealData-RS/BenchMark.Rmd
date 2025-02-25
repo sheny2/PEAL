@@ -14,6 +14,7 @@ library(gridExtra)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 set.seed(1999)
+source("DLMM_engine3RS.R")
 ```
 
 
@@ -89,15 +90,6 @@ three_lvl_dat <- data.table(
 # Assign column names for covariates
 setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), "Y"))
 
-# Display first few rows
-print(head(three_lvl_dat))
-
-
-
-
-
-
-
 
 # Calculate the number of visits per patient per site
 visit_count <- three_lvl_dat %>%
@@ -165,10 +157,57 @@ m_h_all = (rearranged_data %>% group_by(site) %>% dplyr::summarise(n_distinct(pa
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site, m_h_all = m_h_all)
 ```
 
+```{r}
+source("DLMM_engine3RS.R")
+bench::mark(fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL))
+
+fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+
+
+fit03.dlmm$b
+sqrt(fit03.dlmm$V)
+sqrt(fit03.dlmm$s2)
+
+
+true_beta = c(beta0, beta)
+true_beta
+true_sigma = c(sigma_u, sigma_v_hosp, sigma_v_slope_hosp)
+true_sigma
+c(sigma_e)
+
+
+plot(fit03.dlmm$b, true_beta)
+points(fit03.dlmm$b[1], true_beta[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+
+plot(sqrt(fit03.dlmm$V), true_sigma)
+points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
 
 ```{r}
 # DLMM
-source("DLMM_Engine_RS_Clean.R")
+source("DLMM_Engine_RS_BFGS.R")
+bench::mark(fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL))
+
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       id.site = NULL, weights = NULL,
                       pooled = F, reml = T,
@@ -189,8 +228,6 @@ true_beta
 true_sigma = c(sigma_u, sigma_v_hosp, sigma_v_slope_hosp)
 true_sigma
 c(sigma_e)
-
-
 
 
 plot(fit03.dlmm$b, true_beta)

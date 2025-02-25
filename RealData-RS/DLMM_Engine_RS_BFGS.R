@@ -96,18 +96,24 @@ lmm.profile3 <- function(par, pooled = FALSE, reml = TRUE,
     pzh <- ncol(ShZ)
     par_h <- c(par[1], par[1 + h], par[1 + K + h])
     V <- diag(c(par_h[1], rep(par_h[2], mh), rep(par_h[3], (px - 1) * mh)), pzh)
-    Vinv <- solve(V)
+    # V is diagonal
+    Vinv <- diag(1/diag(V))
 
-    logdet <- log(det(diag(1, pzh) + ShZ %*% V))
+    # Compute the log-determinant using the Cholesky factorization
+    A <- diag(1, pzh) + ShZ %*% V
+    logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus)
     lpterm1 <- lpterm1 + logdet
 
-    Wh[[h]] <- solve(Vinv + ShZ)
+    # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
+    L_Wh <- chol(Vinv + ShZ)
+    Wh[[h]] <- chol2inv(L_Wh)
     bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ))
     bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY)
     lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY)
   }
 
-  b <- solve(bterm1, bterm2)
+  L <- chol(bterm1)
+  b <- backsolve(L, forwardsolve(t(L), bterm2))
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
@@ -156,13 +162,14 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
       return(-lmm.profile3(par = parameter, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
     }
 
-    res <- minqa::bobyqa(mypar.init, fn, lower = rep(1e-6, length(mypar.init)), control = list(maxfun = 1e5))
+    # res <- minqa::bobyqa(mypar.init, fn, lower = rep(1e-6, length(mypar.init)), control = list(maxfun = 1e5))
+    # if (verbose) cat(res$msg, " The number of function evaluations used is ", res$feval, '\n')
+    # if (res$ierr != 0) {
+    #   warning(paste0(res$msg))
+    # }
 
-    if (verbose) cat(res$msg, " The number of function evaluations used is ", res$feval, '\n')
-
-    if (res$ierr != 0) {
-      warning(paste0(res$msg))
-    }
+    res <- optim(mypar.init, fn, method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
+    if (verbose) cat(res$msg, " The number of function evaluations used is ", res$counts, '\n')
 
     mypar <- res$par
     res.profile <- lmm.profile3(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
