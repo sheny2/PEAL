@@ -9,12 +9,12 @@ cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 24
+N = 100
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(500:510, H) # of patients (1k to 3k later)
+m_hosp <- sample(200:300, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
@@ -161,10 +161,10 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 
 
-# saveRDS(beta_df, file = "beta_df.rds")
-# saveRDS(sigma_df, file = "sigma_df.rds")
-# beta_df <- readRDS("beta_df.rds")
-# sigma_df <- readRDS("sigma_df.rds")
+saveRDS(beta_df, file = "beta_df_large.rds")
+saveRDS(sigma_df, file = "sigma_df_large.rds")
+beta_df <- readRDS("beta_df_large.rds")
+sigma_df <- readRDS("sigma_df_large.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
