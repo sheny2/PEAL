@@ -161,10 +161,10 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 
 
-saveRDS(beta_df, file = "beta_df_large.rds")
-saveRDS(sigma_df, file = "sigma_df_large.rds")
-beta_df <- readRDS("beta_df_large.rds")
-sigma_df <- readRDS("sigma_df_large.rds")
+# saveRDS(beta_df, file = "beta_df_large.rds")
+# saveRDS(sigma_df, file = "sigma_df_large.rds")
+# beta_df <- readRDS("beta_df_large.rds")
+# sigma_df <- readRDS("sigma_df_large.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
