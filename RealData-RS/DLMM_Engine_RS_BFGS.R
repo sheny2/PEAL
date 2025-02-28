@@ -5,6 +5,7 @@ library(nlme)
 library(Matrix)
 library(minqa)
 
+############ Preprocessing
 # Function to generate the record count matrix for a single hospital
 generate_record_count <- function(data) {
   counts <- table(data[, "n_hi"])
@@ -15,49 +16,70 @@ generate_record_count <- function(data) {
 
 # Function to generate Z_hv matrix for a single hospital
 generate_Zhv_matrix <- function(data) {
+
   record_count_matrix <- generate_record_count(data)
-  diagonal_blocks <- lapply(1:nrow(record_count_matrix), function(i) {
+  diagonal_blocks <- list()
+
+  for (i in 1:nrow(record_count_matrix)) {
     n_hi <- record_count_matrix[i, "n_hi"]
     frequency <- record_count_matrix[i, "frequency"]
+
     identity_block <- diag(frequency)
     ones_vector <- matrix(1, nrow = n_hi, ncol = 1)
-    kronecker(identity_block, ones_vector)
-  })
+
+    kronecker_product <- kronecker(identity_block, ones_vector)
+    diagonal_blocks[[i]] <- kronecker_product
+  }
+
   big_matrix <- do.call(Matrix::bdiag, diagonal_blocks)
   big_matrix <- cbind(1, big_matrix)
   return(as.matrix(big_matrix))
 }
 
-# Function to get summary stats from each site for distributed LMM
-lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL, m_h_all = NULL) {
-  if (is.null(weights)) weights <- rep(1, length(Y))
+
+
+
+
+
+## get summary stats from each site for distributed lmm
+lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL, m_h_all = NULL){
+  if(is.null(weights)) weights <- rep(1, length(Y))
   X <- as.matrix(X)
   id.site <- as.character(id.site)
   id.site.uniq <- unique(id.site)
   px <- ncol(X)
+  # Z <- as.matrix(Z)
+  # pz <- ncol(Z)
 
-  ShXYZ <- lapply(id.site.uniq, function(sh) {
-    wth <- weights[id.site == sh]
+  ShXYZ <- list()
+  for(h in seq_along(id.site.uniq)){
+    sh = id.site.uniq[h]
+    wth = weights[id.site == sh]
     Xh <- X[id.site == sh, ]
     Yh <- Y[id.site == sh]
-    Zh <- Z[[sh]]
 
-    ShX  <- crossprod(Xh * wth, Xh)
-    ShXZ <- crossprod(Xh * wth, Zh)
-    ShXY <- crossprod(Xh * wth, Yh)
-    ShZ  <- crossprod(Zh * wth, Zh)
-    ShZY <- crossprod(Zh * wth, Yh)
-    ShY  <- sum(Yh^2 * wth)
+    Zh <- Z[h][[1]]
+    # Zh <- Z[id.site == sh, ]
+    # non_zero_columns <- colSums(Zh != 0) > 0
+    # Zh <- Zh[, non_zero_columns, drop = FALSE]
+
+    ShX  = t(Xh*wth) %*% Xh
+    ShXZ = t(Xh*wth) %*% Zh
+    ShXY = t(Xh*wth) %*% Yh
+    ShZ  = t(Zh*wth) %*% Zh
+    ShZY = t(Zh*wth) %*% Yh
+    ShY  = sum(Yh ^ 2 *wth)
     Nh <- sum(id.site == sh)
-    mh <- m_h_all[sh, ]
+    mh = m_h_all[h,]
 
-    list(ShX = ShX, ShXZ = ShXZ, ShXY = ShXY,
-         ShZ = ShZ, ShZY = ShZY, ShY = ShY, Nh = Nh, mh = mh)
-  })
+    ShXYZ[[sh]] <- list(ShX  = ShX, ShXZ = ShXZ, ShXY = ShXY,
+                        ShZ  = ShZ, ShZY = ShZY, ShY  = ShY, Nh = Nh, mh = mh)
+  }
 
-  names(ShXYZ) <- id.site.uniq
   return(ShXYZ)
 }
+
+
 
 
 # Function to profile out the residual variance s2

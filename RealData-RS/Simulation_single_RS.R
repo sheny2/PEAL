@@ -3,7 +3,7 @@ library(lme4)
 library(MASS)  # For rmvnorm
 library(data.table)
 
-source("DLMM_engine3RS.R")
+source("DLMM_Engine_RS_BFGS.R")
 
 set.seed(2024)
 
