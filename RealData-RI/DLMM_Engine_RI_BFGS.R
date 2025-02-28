@@ -166,11 +166,11 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
       return(-lmm.profile03(par = parameter, pooled = F, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
     }
 
-    # res <- minqa::bobyqa(mypar.init, fn, lower = rep(1e-6, length(mypar.init)), control = list(maxfun = 1e5))
-    # if (verbose) cat(res$msg, " The number of function evaluations used is ", res$feval, '\n')
-    # if (res$ierr != 0) {
-    #   warning(paste0(res$msg))
-    # }
+    res <- minqa::bobyqa(mypar.init, fn, lower = rep(1e-6, length(mypar.init)), control = list(maxfun = 1e6))
+    if (verbose) cat(res$msg, " The number of function evaluations used is ", res$feval, '\n')
+    if (res$ierr != 0) {
+      warning(paste0(res$msg))
+    }
 
     res <- optim(mypar.init, fn, method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
     if (verbose) cat(res$msg, " The number of function evaluations used is ", res$counts, '\n')

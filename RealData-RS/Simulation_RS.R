@@ -15,8 +15,8 @@ N = 50
 
 
 # Parameters
-H <- 5  # Number of sites
-m_hosp <- sample(50:60, H, replace = T) # Number of patients per site
+H <- 3  # Number of sites
+m_hosp <- sample(20:30, H, replace = T) # Number of patients per site
 
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates

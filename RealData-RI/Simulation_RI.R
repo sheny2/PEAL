@@ -166,6 +166,9 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 # beta_df <- readRDS("beta_df_large.rds")
 # sigma_df <- readRDS("sigma_df_large.rds")
 
+beta_df <- readRDS("beta_df.rds")
+sigma_df <- readRDS("sigma_df.rds")
+
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
 ggplot(aes(x = Parameter, y = Bias)) +
