@@ -3,13 +3,16 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
+source("DLMM_Engine3RI.R")
+# source("DLMM_Engine_RI_BFGS.R")
+
 # Define number of cores for parallel execution
 num_cores <- detectCores()
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 100
+N = 50
 
 
 # Parameters
@@ -41,7 +44,8 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
-  source("DLMM_Engine_RI_BFGS.R")
+  # source("DLMM_Engine_RI_BFGS.R")
+  source("DLMM_Engine_RI_Clean.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -165,9 +169,17 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 # saveRDS(sigma_df, file = "sigma_df_large.rds")
 # beta_df <- readRDS("beta_df_large.rds")
 # sigma_df <- readRDS("sigma_df_large.rds")
+# saveRDS(beta_df, "beta_df_wrong.rds")
+# saveRDS(sigma_df, "sigma_df_wrong.rds")
 
-beta_df <- readRDS("beta_df.rds")
-sigma_df <- readRDS("sigma_df.rds")
+beta_df <- readRDS("beta_df.rds") # 70-100
+sigma_df <- readRDS("sigma_df.rds") # 70-100
+
+beta_df <- readRDS("beta_df_wrong.rds") # 200 to 300, old code
+sigma_df <- readRDS("sigma_df_wrong.rds") # 200 to 300, old code
+
+beta_df <- readRDS("beta_df_large.rds")
+sigma_df <- readRDS("sigma_df_large.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%

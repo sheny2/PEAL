@@ -16,7 +16,7 @@ N = 50
 
 # Parameters
 H <- 3  # Number of sites
-m_hosp <- sample(20:30, H, replace = T) # Number of patients per site
+m_hosp <- sample(10:20, H, replace = T) # Number of patients per site
 
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
@@ -28,13 +28,7 @@ beta <- c(2, 4, 6, 3, 5, 7)  # Fixed effects for covariates
 sigma_e <- 1  # Error variance
 sigma_u <- 3 # Site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying patient-level variance by hospital
-sigma_v_slope_hosp <- runif(H, min = 0.1, max = 1)  # Varying patient-level variance for covariates
-
-
-sigma_e <- 1  # Error variance
-sigma_u <- 3 # Site-level variance
-sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying patient-level variance by hospital
-sigma_v_slope_hosp <- runif(H, min = 0.1, max = 1)  # Varying patient-level variance for covariates
+sigma_v_slope_hosp <- runif(H, min = 0.5, max = 1.5)  # Varying patient-level variance for covariates
 
 
 result_beta = matrix(nrow = (px+1), ncol = N)
@@ -218,10 +212,10 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 
 
-saveRDS(beta_df, file = "beta_df_RS_large.rds")
-saveRDS(sigma_df, file = "sigma_df_RS_large.rds")
-beta_df <- readRDS("beta_df_RS_large.rds")
-sigma_df <- readRDS("sigma_df_RS_large.rds")
+# saveRDS(beta_df, file = "beta_df_RS_large.rds")
+# saveRDS(sigma_df, file = "sigma_df_RS_large.rds")
+# beta_df <- readRDS("beta_df_RS_large.rds")
+# sigma_df <- readRDS("sigma_df_RS_large.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%

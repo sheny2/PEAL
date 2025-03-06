@@ -14,6 +14,7 @@ library(gridExtra)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 set.seed(1918)
+source("DLMM_engine3RI.R")
 ```
 
 
