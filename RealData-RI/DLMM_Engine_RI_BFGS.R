@@ -121,7 +121,8 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
-    remlterm <- log(det(bterm1))
+    # remlterm <- log(det(bterm1))
+    remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
     s2 <- qterm / (N - px)
     lp <- -(lpterm1 + qterm + remlterm) / 2
   } else {
