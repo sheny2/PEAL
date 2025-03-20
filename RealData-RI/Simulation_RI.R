@@ -3,8 +3,8 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
-source("DLMM_Engine3RI.R")
-# source("DLMM_Engine_RI_BFGS.R")
+# source("DLMM_Engine3RI.R")
+source("DLMM_Engine_RI_BFGS.R")
 
 # Define number of cores for parallel execution
 num_cores <- detectCores()
@@ -17,10 +17,10 @@ N = 50
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(200:300, H) # of patients (1k to 3k later)
+m_hosp <- sample(50:60, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
-p_bin <- 5  # of binary X
+p_bin <- 0  # of binary X
 p_cont <- px - p_bin  # of continuous X
 
 
@@ -28,8 +28,8 @@ beta0 = 5 # intercept
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
 
-sigma_e <- 1  # error variance
-sigma_u <- 3 # site-level variance
+sigma_e <- 5  # error variance
+sigma_u <- 5 # site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 
@@ -44,8 +44,7 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
-  # source("DLMM_Engine_RI_BFGS.R")
-  source("DLMM_Engine_RI_Clean.R")
+  source("DLMM_Engine_RI_BFGS.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -70,7 +69,7 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
   v_hi_expanded <- rep(v_hi, times = n_visits)
 
   # covariates
-  X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+  X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.5), nrow = sum(n_visits), ncol = p_bin)
   X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
   X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
 
@@ -78,6 +77,7 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 
   # Compute outcome
   y_hij <- beta0 + X_hij %*% beta + u_h_expanded + v_hi_expanded + epsilon_hij
+
 
   three_lvl_dat <- data.table(
     site = id.hosp.expanded,
@@ -152,11 +152,11 @@ true_beta <- c(beta0,beta)
 true_sigma <- c(sigma_u, sigma_v_hosp, sigma_e)
 
 
-beta_df <- melt(as.data.frame(result_beta))
+beta_df <- reshape2::melt(as.data.frame(result_beta))
 colnames(beta_df) <- c("Simulation", "Estimate")
 beta_df$Parameter <- rep(rownames(result_beta), ncol(result_beta))
 
-sigma_df <- melt(as.data.frame(result_sigma))
+sigma_df <- reshape2::melt(as.data.frame(result_sigma))
 colnames(sigma_df) <- c("Simulation", "Estimate")
 sigma_df$Parameter <- rep(rownames(result_sigma), ncol(result_sigma))
 
@@ -172,14 +172,14 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 # saveRDS(beta_df, "beta_df_wrong.rds")
 # saveRDS(sigma_df, "sigma_df_wrong.rds")
 
-beta_df <- readRDS("beta_df.rds") # 70-100
-sigma_df <- readRDS("sigma_df.rds") # 70-100
-
-beta_df <- readRDS("beta_df_wrong.rds") # 200 to 300, old code
-sigma_df <- readRDS("sigma_df_wrong.rds") # 200 to 300, old code
-
-beta_df <- readRDS("beta_df_large.rds")
-sigma_df <- readRDS("sigma_df_large.rds")
+# beta_df <- readRDS("beta_df.rds") # 70-100
+# sigma_df <- readRDS("sigma_df.rds") # 70-100
+#
+# beta_df <- readRDS("beta_df_wrong.rds") # 200 to 300, old code
+# sigma_df <- readRDS("sigma_df_wrong.rds") # 200 to 300, old code
+#
+# beta_df <- readRDS("beta_df_large.rds")
+# sigma_df <- readRDS("sigma_df_large.rds")
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
@@ -189,7 +189,7 @@ ggplot(aes(x = Parameter, y = Bias)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
-beta_df %>% mutate(Bias = Estimate - True_Value) %>%filter(Parameter!= "X0") %>%
+beta_df %>% mutate(Bias = Estimate - True_Value) %>% filter(Parameter!= "X0") %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
@@ -197,6 +197,7 @@ beta_df %>% mutate(Bias = Estimate - True_Value) %>%filter(Parameter!= "X0") %>%
 
 
 sigma_df %>% mutate(Bias = Estimate - True_Value) %>%
+  # filter(Parameter == "sigma_e") %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +

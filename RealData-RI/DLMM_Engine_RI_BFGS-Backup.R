@@ -98,45 +98,43 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     N <- N + Nh
     pzh <- ncol(ShZ)
     par_h <- c(par[1], par[1 + h])
-    s2 <- tail(par, 1)
-
     V <- diag(c(par_h[1], rep(par_h[2], (pzh - 1))), pzh)
     # V is diagonal
     Vinv <- diag(1/diag(V))
 
     # Compute the log-determinant using the Cholesky factorization
-    A <- diag(1, pzh) + ShZ %*% V / s2
-    logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus) + Nh * log(s2)
+    A <- diag(1, pzh) + ShZ %*% V
+    logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus)
     lpterm1 <- lpterm1 + logdet
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
-    L_Wh <- chol(s2 * Vinv + ShZ)
+    L_Wh <- chol(Vinv + ShZ)
     Wh[[h]] <- chol2inv(L_Wh)
 
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ)) / s2
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY) / s2
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY) / s2
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ))
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY)
+    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY)
   }
 
-  b = solve(bterm1, bterm2)
+  L <- chol(bterm1)
+  b <- backsolve(L, forwardsolve(t(L), bterm2))
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
     remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
+    s2 <- qterm / (N - px)
     lp <- -(lpterm1 + qterm + remlterm) / 2
   } else {
+    s2 <- qterm / N
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
   }
 
-  s2p = qterm / (N)
-
-  res <- list(lp = lp, b = b, s2 = s2, s2p = s2p,
+  res <- list(lp = lp, b = b, s2 = s2,
               allterms = list(lpterm1 = lpterm1, lpterm2 = lpterm2,
                               qterm = qterm, remlterm = remlterm,
                               bterm1 = bterm1, bterm2 = bterm2))
   return(res)
 }
-
 
 # Function to fit 3-level DLMM
 lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL,
@@ -160,7 +158,7 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     ns <- 1
 
     if (is.null(mypar.init)) {
-      mypar.init <- rep(1, pz + 1)
+      mypar.init <- rep(1, pz)
       if (verbose) cat('Default mypar.init (var comp) = ', mypar.init, '\n')
     }
 
@@ -176,12 +174,10 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
 
     mypar <- res$par
     res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
-    s2p <- res.profile$s2p
-    s2 <- tail(mypar,1)
-    V <- mypar[1:pz]
+    s2 <- res.profile$s2
+    # V <- mypar * s2
+    V <- mypar
   }
 
-  return(list(b = res.profile$b, V = V, s2 = s2,
-              s2p = s2p,
-              res = res, res.profile = res.profile))
+  return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))
 }
