@@ -97,8 +97,9 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
     N <- N + Nh
     pzh <- ncol(ShZ)
-    par_h <- c(par[1], par[1 + h])
-    V <- diag(c(par_h[1], rep(par_h[2], (pzh - 1))), pzh)
+    sigma_u2 <- par[1]
+    sigma_vh2 <- par[1 + h]
+    V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
     # V is diagonal
     Vinv <- diag(1/diag(V))
 
@@ -175,8 +176,7 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     mypar <- res$par
     res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
     s2 <- res.profile$s2
-    # V <- mypar * s2
-    V <- mypar
+    V <- mypar * s2
   }
 
   return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))

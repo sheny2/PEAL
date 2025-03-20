@@ -97,10 +97,10 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
     N <- N + Nh
     pzh <- ncol(ShZ)
-    par_h <- c(par[1], par[1 + h])
+    sigma_u2 <- par[1]
+    sigma_vh2 <- par[1 + h]
     s2 <- tail(par, 1)
-
-    V <- diag(c(par_h[1], rep(par_h[2], (pzh - 1))), pzh)
+    V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
     # V is diagonal
     Vinv <- diag(1/diag(V))
 

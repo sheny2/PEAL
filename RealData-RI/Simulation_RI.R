@@ -3,7 +3,7 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
-# source("DLMM_Engine3RI.R")
+# source("DLMM_Engine_RI_BFGS-Backup.R")
 source("DLMM_Engine_RI_BFGS.R")
 
 # Define number of cores for parallel execution
@@ -11,16 +11,15 @@ num_cores <- detectCores()
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
-
 N = 50
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:60, H) # of patients (1k to 3k later)
+m_hosp <- sample(50:70, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
-p_bin <- 0  # of binary X
+p_bin <- 5  # of binary X
 p_cont <- px - p_bin  # of continuous X
 
 
@@ -34,7 +33,7 @@ sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 
 result_beta = matrix(nrow = (px+1), ncol = N)
-rownames(result_beta) <- paste0("X", 0:px)
+rownames(result_beta) <- paste0("Beta", 0:px)
 result_sigma = matrix(nrow = (H+2), ncol = N)
 rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 
@@ -44,6 +43,7 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
+  # source("DLMM_Engine_RI_BFGS-Backup.R")
   source("DLMM_Engine_RI_BFGS.R")
 
   # Generate data
@@ -189,7 +189,7 @@ ggplot(aes(x = Parameter, y = Bias)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
-beta_df %>% mutate(Bias = Estimate - True_Value) %>% filter(Parameter!= "X0") %>%
+beta_df %>% mutate(Bias = Estimate - True_Value) %>% filter(Parameter!= "Beta0") %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +

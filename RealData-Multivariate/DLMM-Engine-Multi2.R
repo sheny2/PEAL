@@ -117,11 +117,11 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     # log-determinant
     A <- diag(1, pzh) + ShZ %*% V / s2
     logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus) + Nh * log(s2)
-    lpterm1 <- lpterm1 + logdet * py
+    lpterm1 <- lpterm1 + logdet
 
-    # Wh[[h]] = solve(Vinv + ShZ)
-    L_Wh <- chol(s2 * Vinv + ShZ)
-    Wh[[h]] <- chol2inv(L_Wh)
+    Wh[[h]] = solve(s2 * Vinv + ShZ)
+    # L_Wh <- chol(s2 * Vinv + ShZ)
+    # Wh[[h]] <- chol2inv(L_Wh)
 
     bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ)) / s2
     bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY) / s2     # bterm2 (px x py) now
@@ -143,7 +143,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
   if (reml) {
     remlterm <- as.numeric(determinant(bterm1, logarithm = TRUE)$modulus)
-    lp <- -(lpterm1 + qterm + remlterm * py) / 2
+    lp <- -(lpterm1 * py + qterm + remlterm * py) / 2
   } else {
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
   }
@@ -181,24 +181,29 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
 
   if (common.s2) {
 
-    if (is.null(mypar.init)) {
-      if(corstr == 'independence'){
-        mypar.init <- c(rep(1, pz+1))
-      }else if(corstr == 'exchangeable'){
-        mypar.init <- c(rep(1, pz+1), 0.1)
-      }
-      if (verbose) cat('Default mypar.init (var comp) = ', mypar.init, '\n')
-    }
-
     fn <- function(parameter) {
       return(-lmm.profile03(par = parameter, pooled = F, reml, Y, X, Z, id.site, weights, ShXYZ, corstr)$lp)
     }
 
-    # lower_bounds <- c(rep(1e-6, pz), -1)
-    # upper_bounds <- c(rep(Inf, pz), 1)
 
-    res <- optim(mypar.init, fn, method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
-    if (verbose) cat(ifelse(res$convergence == 0, "Convergence Reached", "Non-convergence!"), '\n',
+    if (is.null(mypar.init)) {
+      if(corstr == 'independence'){
+        mypar.init <- c(rep(1, pz+1))
+        if (verbose) cat('Default mypar.init (var comp) = ', mypar.init, '\n')
+        lower_bounds <- c(rep(1e-6, pz+1))
+        upper_bounds <- c(rep(Inf, pz+1))
+      }else if(corstr == 'exchangeable'){
+        mypar.init <- c(rep(1, pz+1), 0.1)
+        if (verbose) cat('Default mypar.init (var comp + rho) = ', mypar.init, '\n')
+        lower_bounds <- c(rep(1e-6, pz+1), -1+1e-6)
+        upper_bounds <- c(rep(Inf, pz+1), 1-1e-6)
+      }
+    }
+
+    res <- optim(mypar.init, fn, method = "L-BFGS-B",
+                 lower = lower_bounds, upper = upper_bounds)
+    if (verbose) cat(ifelse(res$convergence == 0,
+                            "Convergence Reached", "Non-convergence!"), '\n',
                      "The number of function evaluations used is ", res$counts[1], '\n')
 
 

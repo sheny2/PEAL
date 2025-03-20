@@ -36,7 +36,7 @@ sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 sigma_e <- 2  # Error variance
-rho <- 0.5  # Correlation between outcomes
+rho <- 0  # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -119,6 +119,42 @@ ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 ```
 
 
+```{r}
+source("DLMM-Engine-Multi2.R")
+fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+
+
+fit03.dlmm$b
+true_beta = rbind(beta0, beta)
+true_beta
+
+
+sqrt(fit03.dlmm$V)
+sqrt(fit03.dlmm$s2)
+
+true_sigma = c(sigma_u, sigma_v_hosp)
+true_sigma
+sigma_e
+
+
+par(mfrow = c(1, py))  
+for (i in 1:py) {
+  plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
+  points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
+  abline(a = 0, b = 1, col = "blue", lwd = 1)
+}
+
+par(mfrow = c(1, 1))  
+plot(sqrt(fit03.dlmm$V), true_sigma)
+points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
 
 ```{r}
 source("DLMM-Engine-Multi2.R")
@@ -160,45 +196,6 @@ points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
-
-```{r}
-source("DLMM-Engine-Multi2.R")
-fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                      id.site = NULL, weights = NULL,
-                      pooled = F, reml = T,
-                      common.s2 = T,
-                      ShXYZ = ShXYZ,  # only need summary stats
-                      corstr = 'independence',
-                      mypar.init = NULL)
-
-
-fit03.dlmm$b
-true_beta = rbind(beta0, beta)
-true_beta
-
-
-sqrt(fit03.dlmm$V)
-sqrt(fit03.dlmm$s2)
-
-true_sigma = c(sigma_u, sigma_v_hosp)
-true_sigma
-sigma_e
-
-
-par(mfrow = c(1, py))  
-for (i in 1:py) {
-  plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
-  points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
-  abline(a = 0, b = 1, col = "blue", lwd = 1)
-}
-
-par(mfrow = c(1, 1))  
-plot(sqrt(fit03.dlmm$V), true_sigma)
-points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
-abline(a = 0, b = 1, col = "blue", lwd = 2)
-```
-
-
 ```{r, eval = F}
 source("DLMM-Engine-Multi.R")
 bench::mark(lmm.fit3(Y = NULL, X = NULL, Z = NULL,
@@ -219,30 +216,3 @@ bench::mark(lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                      mypar.init = NULL))
 ```
 
-
- [1,] 2.897694 2.358952 3.703461
- [2,] 7.127004 3.058267 1.226020
- [3,] 8.456282 9.878712 2.952414
- [4,] 7.837613 5.291998 7.921918
- [5,] 8.956379 3.292536 7.505440
- [6,] 8.578181 8.876588 4.764398
- [7,] 2.669133 4.703915 2.401350
- [8,] 1.701061 1.279037 1.957900
- [9,] 1.457219 5.904887 1.780220
-[10,] 9.384156 2.781941 8.688289
-          [,1]     [,2]     [,3]
-beta0 4.013471 3.529847 4.884307
-      7.124772 3.048361 1.207646
-      8.491125 9.856359 2.939120
-      7.842712 5.300342 7.932253
-      8.961261 3.302352 7.523770
-      8.593317 8.853425 4.703918
-      2.657475 4.696598 2.391351
-      1.704021 1.281290 1.957352
-      1.467287 5.896913 1.765452
-      9.373627 2.774802 8.683298
-[1] 14.677952  5.940714  5.023468  5.324998  8.408578  6.564628
-         [,1]
-[1,] 1.692479
-[1] 3.000000 2.181375 1.597184 1.546005 3.102558 2.419772
-[1] 1

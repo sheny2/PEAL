@@ -12,12 +12,12 @@ cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 50
+N = 20
 
 
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(50:70, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(50:100, H, replace = TRUE)  # Number of patients per site
 px <- 9  # Number of covariates
 p_bin <- 5  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -25,15 +25,15 @@ py <- 3 # Number of outcomes (multivariate)
 
 # Fixed effects
 beta0 <- rnorm(py, 0, 1)  # Intercept for each outcome
-beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)  # Fixed effects for covariates
+beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)
 
 # Variance components
 sigma_u <- 3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- sqrt(1/4)  # Error variance
-rho <- 0  # Correlation between outcomes
+sigma_e <- 3  # Error variance
+rho <- 0.3  # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -46,12 +46,12 @@ rownames(result_beta) <- c(paste0("beta1-", 0:px),
 result_sigma = matrix(nrow = (H+2), ncol = N)
 rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 
-
+result_rho = c()
 
 # Run simulations in parallel using foreach
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 
-  source("DLMM-Engine-Multi.R")
+  source("DLMM-Engine-Multi2.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -135,29 +135,33 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
                         pooled = F, reml = T,
                         common.s2 = T,
                         ShXYZ = ShXYZ,  # only need summary stats
-                        corstr = 'independence',
+                        # corstr = 'independence',
+                        corstr = 'exchangeable',
                         mypar.init = NULL)
 
 
   # Return the estimated parameters
-  list(beta_res = fit03.dlmm$b, sigma_res = c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2)))
+  list(beta_res = fit03.dlmm$b,
+       rho_res = fit03.dlmm$rho,
+       sigma_res = c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2)))
 }
 
 # Store results into matrices
 for (k in 1:N) {
   result_beta[, k] <- c(results[[k]]$beta_res)
   result_sigma[, k] <- results[[k]]$sigma_res
+  result_rho[k] <-  results[[k]]$rho_res
 }
 
 
 stopCluster(cl)
 
 
-
+plot(result_rho)
 
 
 # Sample true parameter values
-true_beta <- rbind(beta0,beta)
+true_beta <- rbind(beta0, beta)
 true_sigma <- c(sigma_u, sigma_v_hosp, sigma_e)
 
 
@@ -176,6 +180,7 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
+  filter(! Parameter %in%  c("beta1-0", "beta2-0", "beta3-0")) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
