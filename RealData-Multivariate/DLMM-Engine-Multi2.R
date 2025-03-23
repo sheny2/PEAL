@@ -119,7 +119,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus) + Nh * log(s2)
     lpterm1 <- lpterm1 + logdet
 
-    Wh[[h]] = solve(s2 * Vinv + ShZ)
+    Wh[[h]] = solve(s2 * Vinv + ShZ, diag(nrow(ShZ)))
     # L_Wh <- chol(s2 * Vinv + ShZ)
     # Wh[[h]] <- chol2inv(L_Wh)
 

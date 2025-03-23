@@ -12,7 +12,7 @@ cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 
-N = 20
+N = 30
 
 
 # Parameters
@@ -33,7 +33,7 @@ sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 sigma_e <- 3  # Error variance
-rho <- 0.3  # Correlation between outcomes
+rho <- 0  # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -135,8 +135,8 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
                         pooled = F, reml = T,
                         common.s2 = T,
                         ShXYZ = ShXYZ,  # only need summary stats
-                        # corstr = 'independence',
-                        corstr = 'exchangeable',
+                        corstr = 'independence',
+                        # corstr = 'exchangeable',
                         mypar.init = NULL)
 
 

@@ -35,8 +35,8 @@ sigma_u <- 3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 2  # Error variance
-rho <- 0  # Correlation between outcomes
+sigma_e <- 3  # Error variance
+rho <- 0 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
