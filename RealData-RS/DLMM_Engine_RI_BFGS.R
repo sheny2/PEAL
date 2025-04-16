@@ -111,12 +111,11 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
     L_Wh <- chol(s2 * Vinv + ShZ)
-    Wh <- chol2inv(L_Wh)
-    # Wh = solve(s2 * Vinv + ShZ)
+    Wh[[h]] <- chol2inv(L_Wh)
 
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ)) / s2
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY) / s2
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh %*% ShZY) / s2
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ)) / s2
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY) / s2
+    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY) / s2
   }
 
   b = solve(bterm1, bterm2)

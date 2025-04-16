@@ -11,35 +11,39 @@ num_cores <- detectCores()
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
-N = 50
+N = 100
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:70, H) # of patients (1k to 3k later)
+m_hosp <- sample(100:200, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
 p_cont <- px - p_bin  # of continuous X
 
 
-beta0 = 5 # intercept
+beta0 = 0 # intercept (No intercept, only px)
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
 
-sigma_e <- 5  # error variance
-sigma_u <- 5 # site-level variance
+sigma_e <- 2  # error variance
+sigma_u <- 3 # site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 
-result_beta = matrix(nrow = (px+1), ncol = N)
-rownames(result_beta) <- paste0("Beta", 0:px)
+# result_beta = matrix(nrow = (px+1), ncol = N)
+# rownames(result_beta) <- paste0("Beta", 0:(px))
+# result_sigma = matrix(nrow = (H+2), ncol = N)
+# rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
+
+result_beta = matrix(nrow = (px), ncol = N)
+rownames(result_beta) <- paste0("Beta", 1:px)
 result_sigma = matrix(nrow = (H+2), ncol = N)
 rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 
 
-
-# Run simulations in parallel using foreach
+# Run simulations in parallel
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
@@ -103,7 +107,7 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
   # XYZ
   Y <- rearranged_data$Y
   X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-  X <- cbind(1, X)
+  # X <- cbind(1, X) # intercept
 
   Z <- list()
 
@@ -146,9 +150,8 @@ stopCluster(cl)
 
 
 
-
 # Sample true parameter values
-true_beta <- c(beta0,beta)
+true_beta <- c(beta)
 true_sigma <- c(sigma_u, sigma_v_hosp, sigma_e)
 
 
@@ -167,30 +170,20 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 # saveRDS(beta_df, file = "beta_df_large.rds")
 # saveRDS(sigma_df, file = "sigma_df_large.rds")
-# beta_df <- readRDS("beta_df_large.rds")
-# sigma_df <- readRDS("sigma_df_large.rds")
-# saveRDS(beta_df, "beta_df_wrong.rds")
-# saveRDS(sigma_df, "sigma_df_wrong.rds")
+
+beta_df <- readRDS("beta_df_large.rds")
+sigma_df <- readRDS("sigma_df_large.rds")
 
 # beta_df <- readRDS("beta_df.rds") # 70-100
 # sigma_df <- readRDS("sigma_df.rds") # 70-100
 #
 # beta_df <- readRDS("beta_df_wrong.rds") # 200 to 300, old code
 # sigma_df <- readRDS("sigma_df_wrong.rds") # 200 to 300, old code
-#
-# beta_df <- readRDS("beta_df_large.rds")
-# sigma_df <- readRDS("sigma_df_large.rds")
+
 
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
 ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.1) +
-  geom_boxplot(fill = "lightblue", alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-beta_df %>% mutate(Bias = Estimate - True_Value) %>% filter(Parameter!= "Beta0") %>%
-  ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))

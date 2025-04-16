@@ -23,18 +23,16 @@ source("DLMM_Engine_RI_BFGS.R")
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(70:100, H, replace = T) # of patients (1k to 3k later)
+m_hosp <- sample(50:100, H, replace = T) # of patients (1k to 3k later)
 
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
 p_cont <- px - p_bin  # of continuous X
 
-
-beta0 = rnorm(1) # intercept
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
-sigma_e <- 2  # error variance
+sigma_e <- 3  # error variance
 sigma_u <- 3 # site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
@@ -63,13 +61,13 @@ v_hi_expanded <- rep(v_hi, times = n_visits)
 
 # covariates
 X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
-X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 5), nrow = sum(n_visits), ncol = p_cont)
 X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
 
 epsilon_hij <- rnorm(sum(n_visits), mean = 0, sd = sigma_e)
 
 # Compute outcome
-y_hij <- beta0 + X_hij %*% beta + u_h_expanded + v_hi_expanded + epsilon_hij
+y_hij <- X_hij %*% beta + u_h_expanded + v_hi_expanded + epsilon_hij
 
 three_lvl_dat <- data.table(
   site = id.hosp.expanded,
@@ -97,7 +95,7 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 # XYZ
 Y <- rearranged_data$Y
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-X <- cbind(1, X)
+X <- cbind(X)
 Z <- list()
 
 for(i in 1:H){
@@ -125,13 +123,12 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       corstr = 'independence',
                       mypar.init = NULL)
 
-true_beta = c(beta0, beta)
+true_beta = c(beta)
 cbind(fit03.dlmm$b, true_beta)
 
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
-# sqrt(fit03.dlmm$s2p)
 
 true_sigma = c(sigma_u, sigma_v_hosp)
 true_sigma
@@ -139,13 +136,15 @@ c(sigma_e)
 
 
 plot(fit03.dlmm$b, true_beta)
-points(fit03.dlmm$b[1], true_beta[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 plot(sqrt(fit03.dlmm$V), true_sigma)
 points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
+
+
+
 
 
 ```{r}
@@ -158,13 +157,12 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       corstr = 'independence',
                       mypar.init = NULL)
 
-true_beta = c(beta0, beta)
+true_beta = c(beta)
 cbind(fit03.dlmm$b, true_beta)
 
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
-
 
 true_sigma = c(sigma_u, sigma_v_hosp)
 true_sigma
@@ -172,35 +170,9 @@ c(sigma_e)
 
 
 plot(fit03.dlmm$b, true_beta)
-points(fit03.dlmm$b[1], true_beta[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 plot(sqrt(fit03.dlmm$V), true_sigma)
 points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
-
-
-
-
-```{r, eval = F}
-source("DLMM_Engine_RI_BFGS.R")
-bench::mark(lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                     id.site = NULL, weights = NULL,
-                     pooled = F, reml = T,
-                     common.s2 = T,
-                     ShXYZ = ShXYZ,
-                     corstr = 'independence',
-                     mypar.init = NULL))
-
-source("DLMM_Engine_RI_BFGS-Backup.R")
-bench::mark(lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                     id.site = NULL, weights = NULL,
-                     pooled = F, reml = T,
-                     common.s2 = T,
-                     ShXYZ = ShXYZ,
-                     corstr = 'independence',
-                     mypar.init = NULL))
-
-```
-

@@ -5,6 +5,7 @@ library(nlme)
 library(Matrix)
 library(minqa)
 
+############ Preprocessing
 # Function to generate the record count matrix for a single hospital
 generate_record_count <- function(data) {
   counts <- table(data[, "n_hi"])
@@ -15,6 +16,7 @@ generate_record_count <- function(data) {
 
 # Function to generate Z_hv matrix for a single hospital
 generate_Zhv_matrix <- function(data) {
+
   record_count_matrix <- generate_record_count(data)
   diagonal_blocks <- list()
 
@@ -34,39 +36,52 @@ generate_Zhv_matrix <- function(data) {
   return(as.matrix(big_matrix))
 }
 
-# Function to get summary stats from each site for distributed LMM
-lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL) {
-  if (is.null(weights)) weights <- rep(1, length(Y))
+
+
+
+## get summary stats from each site for distributed lmm
+lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL, m_h_all = NULL){
+  if(is.null(weights)) weights <- rep(1, length(Y))
   X <- as.matrix(X)
   id.site <- as.character(id.site)
   id.site.uniq <- unique(id.site)
   px <- ncol(X)
+  # Z <- as.matrix(Z)
+  # pz <- ncol(Z)
 
   ShXYZ <- list()
-  for (h in seq_along(id.site.uniq)) {
-    sh <- id.site.uniq[h]
-    wth <- weights[id.site == sh]
+  for(h in seq_along(id.site.uniq)){
+    sh = id.site.uniq[h]
+    wth = weights[id.site == sh]
     Xh <- X[id.site == sh, ]
     Yh <- Y[id.site == sh]
+
     Zh <- Z[h][[1]]
+    # Zh <- Z[id.site == sh, ]
+    # non_zero_columns <- colSums(Zh != 0) > 0
+    # Zh <- Zh[, non_zero_columns, drop = FALSE]
 
-    ShX  <- crossprod((Xh * wth), Xh)
-    ShXZ <- crossprod((Xh * wth), Zh)
-    ShXY <- crossprod((Xh * wth), Yh)
-    ShZ  <- crossprod((Zh * wth), Zh)
-    ShZY <- crossprod((Zh * wth), Yh)
-    ShY  <- sum(Yh^2 * wth)
+    ShX  = t(Xh*wth) %*% Xh
+    ShXZ = t(Xh*wth) %*% Zh
+    ShXY = t(Xh*wth) %*% Yh
+    ShZ  = t(Zh*wth) %*% Zh
+    ShZY = t(Zh*wth) %*% Yh
+    ShY  = sum(Yh ^ 2 *wth)
     Nh <- sum(id.site == sh)
+    mh = m_h_all[h,]
 
-    ShXYZ[[sh]] <- list(ShX = ShX, ShXZ = ShXZ, ShXY = ShXY,
-                        ShZ = ShZ, ShZY = ShZY, ShY = ShY, Nh = Nh)
+    ShXYZ[[sh]] <- list(ShX  = ShX, ShXZ = ShXZ, ShXY = ShXY,
+                        ShZ  = ShZ, ShZY = ShZY, ShY  = ShY, Nh = Nh, mh = mh)
   }
 
   return(ShXYZ)
 }
 
+
+
+
 # Function to profile out the residual variance s2
-lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
+lmm.profile3 <- function(par, pooled = FALSE, reml = TRUE,
                           Y, X, Z, id.site, weights = NULL,
                           ShXYZ, rcpp = FALSE) {
   if (pooled) {
@@ -76,7 +91,8 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
   } else {
     id.site.uniq <- names(ShXYZ)
     px <- ncol(ShXYZ[[1]]$ShX)
-    pz <- length(id.site.uniq) + 1
+    K <- length(ShXYZ)
+    pz <- 1 + K + K
   }
 
   lpterm1 <- lpterm2 <- remlterm <- 0
@@ -94,13 +110,15 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     ShZY <- ShXYZ[[sh]]$ShZY
     ShY  <- ShXYZ[[sh]]$ShY
     Nh   <- ShXYZ[[sh]]$Nh
+    mh   <- ShXYZ[[sh]]$mh
 
     N <- N + Nh
     pzh <- ncol(ShZ)
     sigma_u2 <- par[1]
     sigma_vh2 <- par[1 + h]
+    sigma_p_vh2 <- par[1 + K + h]
     s2 <- tail(par, 1)
-    V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
+    V <- diag(c(sigma_u2, rep(sigma_vh2, mh), rep(sigma_p_vh2, (px - 1) * mh)), pzh)
     # V is diagonal
     Vinv <- diag(1/diag(V))
 
@@ -110,40 +128,40 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     lpterm1 <- lpterm1 + logdet
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
-    L_Wh <- chol(s2 * Vinv + ShZ)
-    Wh <- chol2inv(L_Wh)
-    # Wh = solve(s2 * Vinv + ShZ)
+    # L_Wh <- chol(Vinv + ShZ)
+    # Wh[[h]] <- chol2inv(L_Wh)
+    Wh = solve(s2 * Vinv + ShZ)
 
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ)) / s2
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY) / s2
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh %*% ShZY) / s2
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ))/ s2
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY)/ s2
+    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh %*% ShZY)/ s2
   }
 
-  b = solve(bterm1, bterm2)
+  L <- chol(bterm1)
+  b <- backsolve(L, forwardsolve(t(L), bterm2))
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
-    remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
+    remlterm <- log(det(bterm1))
+    s2p <- qterm / (N - px)
     lp <- -(lpterm1 + qterm + remlterm) / 2
   } else {
+    s2p <- qterm / N
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
   }
 
-  s2p = qterm / (N)
-
-  res <- list(lp = lp, b = b, s2 = s2, s2p = s2p,
+  res <- list(lp = lp, b = b, s2 = s2,
               allterms = list(lpterm1 = lpterm1, lpterm2 = lpterm2,
                               qterm = qterm, remlterm = remlterm,
                               bterm1 = bterm1, bterm2 = bterm2))
   return(res)
 }
 
-
 # Function to fit 3-level DLMM
 lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL,
                      pooled = FALSE, reml = TRUE, common.s2 = TRUE,
                      ShXYZ = list(), corstr = 'independence',
-                     mypar.init = NULL, hessian = FALSE, verbose = TRUE) {
+                     mypar.init = NULL, hessian = FALSE, verbose = T) {
   if (pooled) {
     id.site.uniq <- unique(id.site)
     K <- length(id.site.uniq)
@@ -154,7 +172,7 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     id.site.uniq <- names(ShXYZ)
     px <- ncol(ShXYZ[[1]]$ShX)
     K <- length(ShXYZ)
-    pz <- K + 1
+    pz <- 1 + K + K
   }
 
   if (common.s2) {
@@ -166,29 +184,23 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     }
 
     fn <- function(parameter) {
-      return(-lmm.profile03(par = parameter, pooled = F, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
+      return(-lmm.profile3(par = parameter, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
     }
 
-
-    res <- optim(mypar.init, fn, method = "L-BFGS-B",
+    res <- optim(mypar.init, fn,
                  hessian = T,
-                 lower = rep(1e-6, length(mypar.init)))
-
+                 method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
     if (verbose) cat(ifelse(all(res$convergence == 0, eigen(res$hessian)$value > 0),
                             "Convergence Reached", "Non-convergence!"), 'and',
                      ifelse(all(eigen(res$hessian)$value > 0),
                             "Hessian PD", "Hessian not PD"), '\n',
                      "The number of function evaluations used is ", res$counts[1], '\n')
 
-
     mypar <- res$par
-    res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
+    res.profile <- lmm.profile3(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
     s2 <- tail(mypar,1)
     V <- mypar[1:pz]
-    s2p <- res.profile$s2p
   }
 
-  return(list(b = res.profile$b, V = V, s2 = s2,
-              s2p = s2p,
-              res = res, res.profile = res.profile))
+  return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))
 }

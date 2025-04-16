@@ -39,8 +39,6 @@ generate_Zhv_matrix <- function(data) {
 
 
 
-
-
 ## get summary stats from each site for distributed lmm
 lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL, m_h_all = NULL){
   if(is.null(weights)) weights <- rep(1, length(Y))
@@ -127,11 +125,13 @@ lmm.profile3 <- function(par, pooled = FALSE, reml = TRUE,
     lpterm1 <- lpterm1 + logdet
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
-    L_Wh <- chol(Vinv + ShZ)
-    Wh[[h]] <- chol2inv(L_Wh)
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ))
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY)
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY)
+    # L_Wh <- chol(Vinv + ShZ)
+    # Wh[[h]] <- chol2inv(L_Wh)
+    Wh = solve(Vinv + ShZ)
+
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ))
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY)
+    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh %*% ShZY)
   }
 
   L <- chol(bterm1)
@@ -184,14 +184,14 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
       return(-lmm.profile3(par = parameter, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
     }
 
-    # res <- minqa::bobyqa(mypar.init, fn, lower = rep(1e-6, length(mypar.init)), control = list(maxfun = 1e5))
-    # if (verbose) cat(res$msg, " The number of function evaluations used is ", res$feval, '\n')
-    # if (res$ierr != 0) {
-    #   warning(paste0(res$msg))
-    # }
-
-    res <- optim(mypar.init, fn, method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
-    if (verbose) cat(res$msg, " The number of function evaluations used is ", res$counts, '\n')
+    res <- optim(mypar.init, fn,
+                 hessian = T,
+                 method = "L-BFGS-B", lower = rep(1e-6, length(mypar.init)))
+    if (verbose) cat(ifelse(all(res$convergence == 0, eigen(res$hessian)$value > 0),
+                            "Convergence Reached", "Non-convergence!"), 'and',
+                     ifelse(all(eigen(res$hessian)$value > 0),
+                            "Hessian PD", "Hessian not PD"), '\n',
+                     "The number of function evaluations used is ", res$counts[1], '\n')
 
     mypar <- res$par
     res.profile <- lmm.profile3(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)

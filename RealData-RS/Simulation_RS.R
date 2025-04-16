@@ -18,12 +18,12 @@ N = 50
 H <- 3  # Number of sites
 m_hosp <- sample(10:20, H, replace = T) # Number of patients per site
 
-px <- 6  # Number of covariates
-p_bin <- 3  # Number of binary covariates
+px <- 5  # Number of covariates
+p_bin <- 2  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 
-beta0 <- 5 # Intercept
-beta <- c(2, 4, 6, 3, 5, 7)  # Fixed effects for covariates
+beta0 <- 3 # Intercept
+beta <- c(2, 4, 6, 3, 5)  # Fixed effects for covariates
 
 sigma_e <- 1  # Error variance
 sigma_u <- 3 # Site-level variance
@@ -32,7 +32,9 @@ sigma_v_slope_hosp <- runif(H, min = 0.5, max = 1.5)  # Varying patient-level va
 
 
 result_beta = matrix(nrow = (px+1), ncol = N)
-rownames(result_beta) <- paste0("X", 0:px)
+rownames(result_beta) <- paste0("Beta", 0:px)
+# result_beta = matrix(nrow = (px), ncol = N)
+# rownames(result_beta) <- paste0("Beta", 1:px)
 result_sigma = matrix(nrow = (2*H+2), ncol = N)
 rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), paste0("sigma_v_", 1:H,"_p"), "sigma_e")
 
@@ -111,7 +113,6 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
     arrange(site, total_visits, patient) %>%
     mutate(site = factor(site))
 
-
   # XYZ
   id.site <- rearranged_data$site
 
@@ -120,8 +121,6 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
   X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
   X <- cbind(1, X)
 
-
-
   Z <- list()
 
   for(i in 1:H){
@@ -129,7 +128,6 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
       filter(site == i) %>%
       group_by(site, patient) %>%
       dplyr::summarise(n_hi = n(), .groups = 'drop')
-
 
     df <- rearranged_data %>% filter(site == i) %>% dplyr::select(-c(site,Y, total_visits)) # Replace with actual dataset name
 
@@ -193,17 +191,16 @@ stopCluster(cl)
 
 
 
-
 # Sample true parameter values
-true_beta <- c(beta0,beta)
+true_beta <- c(beta0, beta)
 true_sigma <- c(sigma_u, sigma_v_hosp, sigma_v_slope_hosp, sigma_e)
 
 
-beta_df <- melt(as.data.frame(result_beta))
+beta_df <- reshape2::melt(as.data.frame(result_beta))
 colnames(beta_df) <- c("Simulation", "Estimate")
 beta_df$Parameter <- rep(rownames(result_beta), ncol(result_beta))
 
-sigma_df <- melt(as.data.frame(result_sigma))
+sigma_df <- reshape2::melt(as.data.frame(result_sigma))
 colnames(sigma_df) <- c("Simulation", "Estimate")
 sigma_df$Parameter <- rep(rownames(result_sigma), ncol(result_sigma))
 
@@ -220,13 +217,6 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
 ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.1) +
-  geom_boxplot(fill = "lightblue", alpha = 0.6) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-beta_df %>% mutate(Bias = Estimate - True_Value) %>%filter(Parameter!= "X0") %>%
-  ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
