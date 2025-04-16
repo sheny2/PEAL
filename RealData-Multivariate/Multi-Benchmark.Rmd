@@ -12,7 +12,7 @@ library(MASS)
 library(data.table)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-# set.seed(2025)
+set.seed(1917)
 source("DLMM-Engine-Multi2.R")
 ```
 
@@ -36,7 +36,7 @@ sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 sigma_e <- 3  # Error variance
-rho <- 0 # Correlation between outcomes
+rho <- 0.5 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -156,6 +156,12 @@ points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
+
+
+
+
+
+
 ```{r}
 source("DLMM-Engine-Multi2.R")
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
@@ -197,13 +203,13 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 ```{r, eval = F}
-source("DLMM-Engine-Multi.R")
+source("DLMM-Engine-Multi2.R")
 bench::mark(lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                      id.site = NULL, weights = NULL,
                      pooled = F, reml = T,
                      common.s2 = T,
                      ShXYZ = ShXYZ,
-                     corstr = 'exchangeable',
+                     corstr = 'independence',
                      mypar.init = NULL))
 
 source("DLMM-Engine-Multi2.R")

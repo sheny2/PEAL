@@ -157,9 +157,6 @@ for (k in 1:N) {
 stopCluster(cl)
 
 
-plot(result_rho)
-
-
 # Sample true parameter values
 true_beta <- rbind(beta0, beta)
 true_sigma <- c(sigma_u, sigma_v_hosp, sigma_e)
@@ -177,7 +174,17 @@ beta_df$True_Value <- rep(true_beta, times = ncol(result_beta))
 sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 
 
+saveRDS(beta_df, file = "beta_df_IND.rds")
+saveRDS(sigma_df, file = "sigma_df_IND.rds")
+beta_df <- readRDS("beta_df_IND.rds")
+sigma_df <- readRDS("sigma_df_IND.rds")
 
+beta_df %>% mutate(Bias = Estimate - True_Value) %>%
+  # filter(! Parameter %in%  c("beta1-0", "beta2-0", "beta3-0")) %>%
+  ggplot(aes(x = Parameter, y = Bias)) +
+  geom_jitter(alpha = 0.1) +
+  geom_boxplot(fill = "lightblue", alpha = 0.6) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 beta_df %>% mutate(Bias = Estimate - True_Value) %>%
   filter(! Parameter %in%  c("beta1-0", "beta2-0", "beta3-0")) %>%

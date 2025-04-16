@@ -1,0 +1,332 @@
+---
+title: "Benchmark"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+# set.seed(2025)
+source("DLMM-Engine-Multi3.R")
+```
+
+
+```{r}
+# Parameters
+H <- 5                           # Number of sites
+m_hosp <- sample(30:30, H, replace = TRUE)  # Patients per site
+px <- 9                          # Number of covariates
+p_bin <- 5                       # Number of binary covariates
+p_cont <- px - p_bin             # Number of continuous covariates
+py <- 2                     # Number of outcomes (multivariate)
+
+# Fixed effects
+# beta0 <- rnorm(py, 0, 1)         # Intercepts
+beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)  # Fixed effects
+
+# Variance components
+sigma_u <- 3                     # Site-level SD
+sigma_v_hosp <- runif(H, 1, 5)   # Patient-level SD by hospital
+sigma_e <- 2                     # Error SD
+
+# Correlation structures
+rho <- 0.3                       # Exchangeable corr between outcomes (errors)
+rho_v <- 0.001                     # Exchangeable corr between outcomes (patient effects)
+
+# Generate correlation matrices
+rho_mat <- matrix(rho, py, py); diag(rho_mat) <- 1
+rho_v_mat <- matrix(rho_v, py, py); diag(rho_v_mat) <- 1
+
+# Generate data structure
+nn <- rep(m_hosp, times = 1)      # Patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)
+id.pat <- sequence(nn)
+n_visits <- sample(1:30, sum(nn), replace = TRUE)
+
+# Expand IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Generate random effects
+u_h <- rnorm(H, 0, sigma_u)      # Hospital effects
+
+# Patient-level multivariate random effects with exchangeable structure
+v_hi <- matrix(0, nrow = sum(nn), ncol = py)
+for(h in 1:H){
+  hosp_pats <- which(id.hosp == h)
+  n_pats <- length(hosp_pats)
+  v_hi[hosp_pats,] <- mvrnorm(n_pats, 
+                             mu = rep(0, py),
+                             Sigma = sigma_v_hosp[h]^2 * rho_v_mat)
+}
+
+# Expand random effects
+u_h_expanded <- rep(rep(u_h, times = m_hosp), times = n_visits)
+v_hi_expanded <- apply(v_hi, 2, function(x) rep(x, times = n_visits))
+
+# Generate covariates
+X_bin <- matrix(rbinom(sum(n_visits)*p_bin, 1, 0.3), sum(n_visits), p_bin)
+X_cont <- matrix(rnorm(sum(n_visits)*p_cont), sum(n_visits), p_cont)
+X_hij <- cbind(X_bin, X_cont)
+
+# Generate multivariate errors
+epsilon_hij <- mvrnorm(sum(n_visits), 
+                      mu = rep(0, py),
+                      Sigma = sigma_e^2 * rho_mat)
+
+# Compute outcomes
+Y_hij <- matrix(NA, nrow = sum(n_visits), ncol = py)
+for(k in 1:py){
+  Y_hij[,k] <- X_hij %*% beta[,k] + u_h_expanded + v_hi_expanded[,k] + epsilon_hij[,k]
+}
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij, Y_hij
+) %>% data.frame()
+
+setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), paste0("Y", 1:py)))
+
+# Preprocessing
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+
+
+# XYZ
+Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+# X <- cbind(1, X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+    filter(site == i) %>%
+    group_by(site, patient) %>%
+    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data$site
+
+ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+
+# Verify correlation structures
+cor(epsilon_hij)       # Should show ~rho for off-diagonals
+rho
+cor(v_hi)             # Should show ~rho_v for off-diagonals
+rho_v
+```
+
+<!-- ```{r} -->
+<!-- source("DLMM-Engine-Multi3.R") -->
+<!-- fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL, -->
+<!--                       id.site = NULL, weights = NULL, -->
+<!--                       pooled = F, reml = T, -->
+<!--                       common.s2 = T, -->
+<!--                       ShXYZ = ShXYZ,  # only need summary stats -->
+<!--                       corstr = 'independence', -->
+<!--                       mypar.init = NULL) -->
+
+
+<!-- fit03.dlmm$b -->
+<!-- true_beta = rbind(beta0, beta) -->
+<!-- true_beta -->
+
+
+<!-- sqrt(fit03.dlmm$V) -->
+<!-- sqrt(fit03.dlmm$s2) -->
+
+<!-- true_sigma = c(sigma_u, sigma_v_hosp) -->
+<!-- true_sigma -->
+<!-- sigma_e -->
+
+
+<!-- par(mfrow = c(1, py))   -->
+<!-- for (i in 1:py) { -->
+<!--   plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i)) -->
+<!--   points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red") -->
+<!--   abline(a = 0, b = 1, col = "blue", lwd = 1) -->
+<!-- } -->
+
+<!-- par(mfrow = c(1, 1))   -->
+<!-- plot(sqrt(fit03.dlmm$V), true_sigma) -->
+<!-- points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red") -->
+<!-- abline(a = 0, b = 1, col = "blue", lwd = 2) -->
+<!-- ``` -->
+
+
+```{r}
+source("DLMM-Engine-Multi3.R")
+fit03.dlmm = lmm.fit3Multi(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL, py = py)
+
+est_beta = matrix(fit03.dlmm$b, ncol = py)
+true_beta = beta
+
+est_sigma = sqrt(c(fit03.dlmm$V, fit03.dlmm$s2))
+true_sigma = c(sigma_u, sigma_v_hosp, sigma_e)
+
+
+par(mfrow = c(2, 2))  
+for (i in 1:py) {
+  plot(est_beta[,i], true_beta[,i], main = paste0("Outcome Y", i), 
+       xlab = "est beta", ylab = "true beta")
+  abline(a = 0, b = 1, col = "blue", lwd = 1)
+}
+
+par(mfrow = c(1, 1))  
+plot(est_sigma^2, true_sigma^2, xlab = "est var", ylab = "true var")
+points((est_sigma[1])^2, (true_sigma[1])^2, col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
+
+
+
+```{r}
+source("DLMM-Engine-Multi3.R")
+fit03.dlmm = lmm.fit3Multi(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'exchangeable',
+                      mypar.init = NULL, py = py)
+
+
+est_beta = matrix(fit03.dlmm$b, ncol = py)
+true_beta = beta
+
+est_sigma = sqrt(c(fit03.dlmm$V, fit03.dlmm$s2))
+true_sigma = c(sigma_u, sigma_v_hosp, sigma_e)
+
+fit03.dlmm$rho_v
+fit03.dlmm$rho
+
+
+par(mfrow = c(2, 2))  
+for (i in 1:py) {
+  plot(est_beta[,i], true_beta[,i], main = paste0("Outcome Y", i), 
+       xlab = "est beta", ylab = "true beta")
+  abline(a = 0, b = 1, col = "blue", lwd = 1)
+}
+
+par(mfrow = c(1, 1))  
+plot(est_sigma^2, true_sigma^2, xlab = "est var", ylab = "true var")
+points((est_sigma[1])^2, (true_sigma[1])^2, col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
+
+
+
+
+```{r}
+source("DLMM-Engine-Multi3.R")
+fit03.dlmm = lmm.fit3Multi(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'exchangeable',
+                      mypar.init = NULL, py = 3)
+
+
+fit03.dlmm$b
+true_beta = rbind(beta0, beta)
+true_beta
+
+
+sqrt(fit03.dlmm$V)
+sqrt(fit03.dlmm$s2)
+
+true_sigma = c(sigma_u, sigma_v_hosp)
+true_sigma
+sigma_e
+
+fit03.dlmm$rho
+rho
+
+
+# par(mfrow = c(1, py))  
+# for (i in 1:py) {
+#   plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
+#   points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
+#   abline(a = 0, b = 1, col = "blue", lwd = 1)
+# }
+
+plot(fit03.dlmm$b, true_beta, main = paste("Beta", i))
+abline(a = 0, b = 1, col = "blue", lwd = 1)
+
+par(mfrow = c(1, 1))  
+plot(sqrt(fit03.dlmm$V), true_sigma)
+points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
+
+
+
+
+
+```{r, eval = F}
+source("DLMM-Engine-Multi4.R")
+fit03.dlmm = lmm.fit3_multivariate(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'exchangeable',
+                      mypar.init = NULL, M = 3)
+
+
+fit03.dlmm$b
+true_beta = rbind(beta0, beta)
+true_beta
+
+
+sqrt(fit03.dlmm$V)
+sqrt(fit03.dlmm$s2)
+
+true_sigma = c(sigma_u, sigma_v_hosp)
+true_sigma
+sigma_e
+
+fit03.dlmm$rho
+rho
+
+
+# par(mfrow = c(1, py))  
+# for (i in 1:py) {
+#   plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
+#   points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
+#   abline(a = 0, b = 1, col = "blue", lwd = 1)
+# }
+
+plot(fit03.dlmm$b, true_beta, main = paste("Beta", i))
+abline(a = 0, b = 1, col = "blue", lwd = 1)
+
+par(mfrow = c(1, 1))  
+plot(sqrt(fit03.dlmm$V), true_sigma)
+points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
