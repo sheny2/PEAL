@@ -1,0 +1,116 @@
+---
+title: "Benchmark"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(gridExtra)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+source("DLMM-2-Multi.R")
+```
+
+
+```{r}
+library(mvtnorm)
+
+# Parameters
+K <- 5                       # number of sites
+nn <- sample(2000, K, replace = TRUE) # Number of patients per hospital
+px <- 5                      # covariates
+pz <- px + 1                 # random effects (all X + intercept)
+m <- 3                       # number of outcomes
+rho <- 0.5                   # exchangeable correlation
+
+# True parameters
+b <- c(1:px)/px*2            # true fixed effects (same for all outcomes)
+s2 <- rep(0.5, K)            # site-specific error variance
+V <- diag(runif(n = pz, 0, 3)) # random effects covariance
+
+# Create exchangeable correlation matrix for outcomes
+R <- matrix(rho, nrow = m, ncol = m)
+diag(R) <- 1
+
+# Generate data
+X <- matrix(NA, sum(nn), px)
+Z <- matrix(NA, sum(nn), pz)
+id.site <- as.character(rep(1:K, nn))
+Y <- matrix(NA, nrow = sum(nn), ncol = m)  # Matrix for multivariate outcomes
+u <- array(NA, dim = c(K, pz, m))          # 3D array for random effects
+
+for(ii in 1:K){
+  # Generate covariates (same for all outcomes)
+  X[id.site==ii,] <- matrix(rbinom(nn[ii]*px, size = 1, prob = 0.3), nn[ii], px)
+  Z[id.site==ii,] <- cbind(1, X[id.site==ii,])
+  
+  # Generate random effects for each outcome dimension
+  for(j in 1:m){
+    u[ii,,j] <- c(rmvnorm(1, rep(0, pz), V))
+  }
+  
+  # Generate correlated errors (exchangeable structure)
+  ei <- rmvnorm(nn[ii], mean = rep(0, m), sigma = R)
+  
+  # Generate multivariate outcomes
+  for(j in 1:m){
+    Y[id.site==ii, j] <- X[id.site==ii,] %*% b + 
+                         Z[id.site==ii,] %*% u[ii,,j] + 
+                         ei[,j] * sqrt(s2[ii])
+  }
+}
+
+# Convert to long format for analysis
+long_data <- data.frame(
+  site = rep(id.site, each = m),
+  patient = rep(1:sum(nn), each = m),
+  outcome = factor(rep(paste0("Y", 1:m), sum(nn))),
+  Y = c(t(Y))
+)
+
+# Add covariates (repeated for each outcome)
+for(p in 1:px){
+  long_data[[paste0("X", p)]] <- rep(X[, p], each = m)
+}
+
+# Verify correlation structure
+cor_matrix <- cor(Y)
+cor_matrix
+
+
+# X
+# Y
+# Z
+
+# Y = as.matrix(long_data$Y)
+# X = as.matrix(long_data[,-(1:4)])
+# Z = cbind(1, X)
+```
+
+
+```{r}
+ShXYZ <- lmm.get.summary.multi(Y, X, Z, id.site)
+
+# Fit model with exchangeable correlation
+fit <- lmm.fit.multi(Y, X, Z, id.site, 
+                    ShXYZ = ShXYZ, m = 3,
+                    corstr = "exchangeable")
+
+```
+
+
+
+```{r}
+library(nlme)
+fit <- lme(Y ~ X1 + X2 + X3 + X4 + X5, 
+           random = list(site = ~ 1, patient = ~ 1),
+           correlation = corCompSymm(form = ~ 1 | site/patient),
+           data = long_data)
+summary(fit)
+```
+

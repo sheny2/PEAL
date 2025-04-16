@@ -1,0 +1,120 @@
+---
+title: "Benchmark"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(gridExtra)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+source("DLMM-2.R")
+```
+
+
+```{r}
+K <- 5                       # number of sites
+nn <- sample(3000, K, replace = TRUE) # Number of patients per hospital
+px <- 5                   # covariates
+pz <- px+1                     # assume random effects for all X + intercept
+b <- c(1:px)/px*2              # true fixed-effect
+s2 <- rep(0.5, K)              # random error variance
+V = diag(runif(n = pz, 0,3))
+
+X <- matrix(NA, sum(nn), px)
+Z <- matrix(NA, sum(nn), pz)
+id.site <- as.character(rep(1:K, nn))
+Y <- rep(NA, sum(nn))
+u <- matrix(NA, K, pz)
+for(ii in 1:K){
+  X[id.site==ii,] <- matrix(rbinom(nn[ii]*px, size=1, prob = 0.3), nn[ii], px)
+  # matrix(rnorm(nn[ii]*px), nn[ii], px)
+  Z[id.site==ii,] <- cbind(1, X[id.site==ii,])
+  ui <- c(rmvnorm(1, rep(0,pz), V))
+  u[ii,] <- ui
+  ei <- rnorm(nn[ii], 0, sqrt(s2[ii]))
+  Y[id.site==ii] <- X[id.site==ii,]%*%b + Z[id.site==ii,] %*%ui + ei
+}
+
+s2[1]
+diag(V)
+b
+```
+
+```{r}
+ShXYZ <- lmm.get.summary2(Y, X, Z, id.site)
+```
+
+```{r}
+t(X) %*% X
+X_std <- scale(X)
+t(X_std) %*% X_std
+```
+
+
+```{r}
+source("DLMM-2.R")
+fit02.dlmm = lmm.fit2(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+
+true_beta = c(b)
+cbind(fit02.dlmm$b, true_beta)
+
+
+diag(sqrt(fit02.dlmm$V))
+sqrt(fit02.dlmm$s2)
+est_sigma = c(diag(sqrt(fit02.dlmm$V)), sqrt(fit02.dlmm$s2))
+  
+sqrt(diag(V))
+sqrt(s2)[1]
+true_sigma = c(sqrt(diag(V)), sqrt(s2)[1])
+
+
+plot(fit02.dlmm$b, true_beta)
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+
+plot(est_sigma, true_sigma)
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
+
+
+
+
+
+<!-- ```{r} -->
+<!-- # sim_data -->
+<!-- sim_data = as.data.frame(cbind(id.site, X, Y)) -->
+<!-- names(sim_data) = c("id.site", paste0("X", 1:px), "Y") -->
+<!-- sim_data[, 1] <- as.factor(sim_data[, 1]) -->
+<!-- sim_data[, -1] <- lapply(sim_data[, -1], as.numeric) -->
+
+<!-- # lmer fit -->
+<!-- fit00 <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + -->
+<!--                 (X1 + X2 + X3 + X4 + X5|id.site), data = sim_data) -->
+
+<!-- summary(fit00)$coef[,1] -->
+<!-- VarCorr(fit00) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- source("dlmm-engine.R") -->
+<!-- SiXYZ <- lmm.get.summary(Y, X, Z=X, weights = NULL, id.site) -->
+<!-- fit1 <- lmm.fit(SiXYZ = SiXYZ, pooled=F, reml=T, common.s2=T, hessian=T) -->
+
+<!-- fit1$b -->
+<!-- sqrt(fit1$V) -->
+<!-- sqrt(fit1$s2) -->
+
+<!-- fit1$res.profile$lp -->
+<!-- ``` -->
