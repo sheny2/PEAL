@@ -84,6 +84,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
   bterm2 <- rep(0, px)
   Wh <- list()
   N <- 0
+  df = 0
 
   for (h in seq_along(id.site.uniq)) {
     sh <- id.site.uniq[h]
@@ -110,11 +111,13 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
     L_Wh <- chol(Vinv + ShZ)
-    Wh[[h]] <- chol2inv(L_Wh)
+    Wh <- chol2inv(L_Wh)
 
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ))
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY)
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY)
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ))
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY)
+    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh %*% ShZY)
+
+    df = df + pzh - 1
   }
 
   L <- chol(bterm1)
@@ -123,7 +126,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
   if (reml) {
     remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
-    s2 <- qterm / (N - px)
+    s2 <- qterm / (N - df)
     lp <- -(lpterm1 + qterm + remlterm) / 2
   } else {
     s2 <- qterm / N
@@ -176,7 +179,7 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     mypar <- res$par
     res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
     s2 <- res.profile$s2
-    V <- mypar * s2
+    V <- mypar
   }
 
   return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))

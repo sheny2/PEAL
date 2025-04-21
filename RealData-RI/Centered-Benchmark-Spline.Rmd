@@ -8,6 +8,7 @@ author: "Yicheng Shen"
 knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
 library(tidyverse)
 library(lme4)
+library(splines)
 library(MASS)  
 library(data.table)
 library(gridExtra)
@@ -17,13 +18,13 @@ source("DLMM_Engine_RI_BFGS.R")
 ```
 
 
-```{r}
+```{r, warning=F}
 ##############################
 # different site different patients
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:60, H, replace = T) # of patients (1k to 3k later)
+m_hosp <- sample(50:100, H, replace = T) # of patients (1k to 3k later)
 
 
 px <- 9  # of covariates
@@ -32,9 +33,9 @@ p_cont <- px - p_bin  # of continuous X
 
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
-sigma_e <- 5  # error variance
+sigma_e <- 2  # error variance
 sigma_u <- 3 # site-level variance
-sigma_v_hosp <- runif(H, min = 1, max = 3)  # Varying sigma_v by hospital
+sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 
 # Generate data
@@ -80,22 +81,53 @@ three_lvl_dat <- data.table(
 setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), "Y"))
 
 
+# Add a time variable (e.g., visit order or actual time)
+three_lvl_dat <- three_lvl_dat %>%
+  group_by(site, patient) %>%
+  mutate(
+    delta_t = ifelse(visit == 1, 0, rpois(n(), lambda = 7)),   # Poisson 7 (every week?)
+    visit_time = ifelse(visit == 1, 0, cumsum(delta_t))        # Cumulative time since first visit
+  ) %>%
+  ungroup() %>%
+  mutate(
+    # time_effect = 0.5 * visit_time - 0.03 * (visit_time)^2,
+    time_effect = cos(visit_time),
+    Y = Y + time_effect  # Add to existing outcome
+  )
+
+
+three_lvl_dat %>% filter(site == 1) %>% mutate(patient = factor(patient)) %>%
+  ggplot(aes(x = X9, y = Y, colour = patient, group = patient)) +
+  geom_point(alpha = 0.5) + 
+  geom_smooth(se = F, size = .3, method = "lm") + 
+  geom_smooth(aes(X9, Y, group = 1), se = F, size = 2, col = "BlACK") + 
+  theme(legend.position = "none")
+
+three_lvl_dat %>% mutate(patient = factor(patient)) %>% 
+  filter(site == 1) %>% group_by(patient) %>% filter(max(visit)>10) %>%
+  ggplot(aes(x = visit_time, y = Y, colour = patient, group = patient)) +
+  geom_point(alpha = 0.5) + 
+  geom_smooth(se = F, size = .3) +
+  geom_smooth(aes(visit_time, Y, group = 1), se = F) + theme(legend.position = "none")
+
+
 # Preprocessing
 # Calculate the number of visits per patient per site
 visit_count <- three_lvl_dat %>%
   dplyr::group_by(site, patient) %>%
   dplyr::summarise(total_visits = n(), .groups = "drop")
 
-# Reorder data (as a preprocess probably)
+# Reorder data
 rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
   arrange(site, total_visits, patient) %>%
   mutate(site = factor(site))
 
 
 # XYZ
-Y <- rearranged_data$Y
+Y <- rearranged_data$Y 
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-X <- cbind(X)
+T_ns = ns(rearranged_data$visit_time, 3) %>% as.matrix(ncol = 3)
+X <- cbind(X, T_ns)
 Z <- list()
 
 for(i in 1:H){
@@ -110,6 +142,8 @@ for(i in 1:H){
 id.site <- rearranged_data$site
 
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+
+plot(density(Y))
 ```
 
 
@@ -123,13 +157,12 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       ShXYZ = ShXYZ,  # only need summary stats
                       corstr = 'independence',
                       mypar.init = NULL)
-fit03.dlmm$res
-fit03.dlmm$res.profile$allterms$qterm
-fit03.dlmm$s2p
 
-est_beta = c(fit03.dlmm$b)
+est_beta = c(fit03.dlmm$b[1:px])
 true_beta = c(beta)
 cbind(est_beta, true_beta)
+fit03.dlmm$b
+
 
 
 sqrt(fit03.dlmm$V)
@@ -140,7 +173,7 @@ true_sigma
 c(sigma_e)
 
 
-plot(fit03.dlmm$b, true_beta)
+plot(est_beta, true_beta)
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 plot(sqrt(fit03.dlmm$V), true_sigma)
@@ -149,64 +182,28 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 
-
-```{r, eval = T}
-source("DLMM_Engine_RI_BFGS-Backup.R")
-fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                      id.site = NULL, weights = NULL,
-                      pooled = F, reml = T,
-                      common.s2 = T,
-                      ShXYZ = ShXYZ,  # only need summary stats
-                      corstr = 'independence',
-                      mypar.init = NULL)
-fit03.dlmm$res
-fit03.dlmm$res.profile$allterms$qterm
-
-est_beta = c(fit03.dlmm$b)
-true_beta = c(beta)
-cbind(est_beta, true_beta)
-
-
-sqrt(fit03.dlmm$V)
-sqrt(fit03.dlmm$s2)
-
-true_sigma = c(sigma_u, sigma_v_hosp)
-true_sigma
-c(sigma_e)
-
-
-plot(fit03.dlmm$b, true_beta)
-abline(a = 0, b = 1, col = "blue", lwd = 2)
-
-plot(sqrt(fit03.dlmm$V), true_sigma)
-points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
-abline(a = 0, b = 1, col = "blue", lwd = 2)
-```
-
-
-
-
-```{r, eval = T}
+```{r}
 three_lvl_dat$site = factor(three_lvl_dat$site)
 three_lvl_dat$patient = factor(three_lvl_dat$patient)
 three_lvl_dat$visit = factor(three_lvl_dat$visit)
 
-model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
-              (1 | site) + (site || site: patient), 
-              data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
-                                                        optCtrl  = list(method="L-BFGS-B")))
+# Fit with natural cubic spline (3 knots) for time
+model_lmer <- lmer(
+  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
+      ns(visit_time, df = 3) +      # Spline for time (3 degrees of freedom)
+      (1 | site) + (1 | site:patient),
+  data = three_lvl_dat
+)
 
-# summary(model)
+summary(model_lmer)
 
-fixed_effects <- fixef(model)
-fixed_effects
 
-vc <- VarCorr(model)
-vc
+plot(fit03.dlmm$b, fixed.effects(model_lmer))
+abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 
-```{r, eval = F}
+```{r}
 library(nlme)
 
 # Fit model with hospital-specific patient variance
@@ -223,7 +220,7 @@ VarCorr(model_nlme)
 
 
 
-```{r, eval = F}
+```{r}
 library(brms)
 
 # Fit model with hospital-specific patient variance
@@ -232,7 +229,7 @@ model_brms <- brm(
     (1 | site) + (site | site:patient),
   # prior = set_prior("normal(0, 5)"),  # Weakly informative priors
   data = three_lvl_dat,
-  chains = 2, iter = 5000  # Short MCMC for demonstration
+  chains = 1, iter = 5000  # Short MCMC for demonstration
 )
 
 # Extract variance components
@@ -240,20 +237,4 @@ model_brms <- brm(
 summary(model_brms)
 ranef(model_brms)  # Random effects per site/patient
 ```
-
-
-
-
-
-
-```{r}
-bench::mark(fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                      id.site = NULL, weights = NULL,
-                      pooled = F, reml = T,
-                      common.s2 = T,
-                      ShXYZ = ShXYZ,  # only need summary stats
-                      corstr = 'independence',
-                      mypar.init = NULL))
-```
-
 

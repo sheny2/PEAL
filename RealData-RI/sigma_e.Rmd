@@ -31,7 +31,7 @@ p_bin <- 5  # of binary X
 p_cont <- px - p_bin  # of continuous X
 
 
-beta0 = rnorm(1) # intercept
+beta0 = 3 # intercept
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
 sigma_e <- 2  # error variance
@@ -112,6 +112,8 @@ for(i in 1:H){
 id.site <- rearranged_data$site
 
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+
+plot(density(Y))
 ```
 
 

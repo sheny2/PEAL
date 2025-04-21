@@ -3,20 +3,20 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
-# source("DLMM_Engine_RI_BFGS-Backup.R")
-source("DLMM_Engine_RI_BFGS.R")
+source("DLMM_Engine_RI_BFGS-Backup.R")
+# source("DLMM_Engine_RI_BFGS.R")
 
 # Define number of cores for parallel execution
 num_cores <- detectCores()
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
-N = 100
+N = 50
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(100:200, H) # of patients (1k to 3k later)
+m_hosp <- sample(40:60, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
@@ -28,8 +28,8 @@ beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
 
 sigma_e <- 2  # error variance
-sigma_u <- 3 # site-level variance
-sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
+sigma_u <- 2 # site-level variance
+sigma_v_hosp <- runif(H, min = 1, max = 4)  # Varying sigma_v by hospital
 
 
 # result_beta = matrix(nrow = (px+1), ncol = N)
@@ -47,8 +47,8 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e")
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr")) %dopar% {
 # for(k in 1:N) {
 
-  # source("DLMM_Engine_RI_BFGS-Backup.R")
-  source("DLMM_Engine_RI_BFGS.R")
+  source("DLMM_Engine_RI_BFGS-Backup.R")
+  # source("DLMM_Engine_RI_BFGS.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -171,8 +171,8 @@ sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma))
 # saveRDS(beta_df, file = "beta_df_large.rds")
 # saveRDS(sigma_df, file = "sigma_df_large.rds")
 
-beta_df <- readRDS("beta_df_large.rds")
-sigma_df <- readRDS("sigma_df_large.rds")
+# beta_df <- readRDS("beta_df_large.rds")
+# sigma_df <- readRDS("sigma_df_large.rds")
 
 # beta_df <- readRDS("beta_df.rds") # 70-100
 # sigma_df <- readRDS("sigma_df.rds") # 70-100

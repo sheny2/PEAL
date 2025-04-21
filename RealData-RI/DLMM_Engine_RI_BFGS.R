@@ -65,7 +65,7 @@ lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weigh
   return(ShXYZ)
 }
 
-# Function to profile out the residual variance s2
+# Function to get profile likelihoods
 lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
                           Y, X, Z, id.site, weights = NULL,
                           ShXYZ, rcpp = FALSE) {
@@ -129,7 +129,7 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
   }
 
-  s2p = qterm / (N)
+  s2p = qterm / (N-px)
 
   res <- list(lp = lp, b = b, s2 = s2, s2p = s2p,
               allterms = list(lpterm1 = lpterm1, lpterm2 = lpterm2,
@@ -137,6 +137,8 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
                               bterm1 = bterm1, bterm2 = bterm2))
   return(res)
 }
+
+
 
 
 # Function to fit 3-level DLMM
