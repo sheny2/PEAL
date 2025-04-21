@@ -25,15 +25,15 @@ H <- 5  # Number of sites
 m_hosp <- sample(10:20, H, replace = T) # Number of patients per site
 
 px <- 5  # Number of covariates
-p_bin <- 3  # Number of binary covariates
+p_bin <- 2  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 
-beta0 <- 1 # Intercept
+beta0 <- 0 # Intercept
 beta <- 1:px  # Fixed effects for covariates
 
-sigma_e <- 1 # Error variance
+sigma_e <- 2 # Error variance
 sigma_u <- 3 # Site-level variance
-sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying patient-level variance by hospital
+sigma_v_hosp <- runif(H, min = 1, max = 3)  # Varying patient-level variance by hospital
 sigma_v_slope_hosp <- runif(H, min = 0.1, max = 1)  # Varying patient-level variance for covariates
 
 # Generate data
@@ -109,7 +109,7 @@ id.site <- rearranged_data$site
 Y <- rearranged_data$Y
 
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-X <- cbind(1, X)
+# X <- cbind(1, X)
 
 Z <- list()
 
@@ -173,8 +173,8 @@ sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
 
 
-true_beta = c(beta0, beta)
-# true_beta = c(beta)
+# true_beta = c(beta0, beta)
+true_beta = c(beta)
 true_beta
 true_sigma = c(sigma_u, sigma_v_hosp, sigma_v_slope_hosp)
 true_sigma
@@ -215,8 +215,8 @@ sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
 
 
-true_beta = c(beta0, beta)
-# true_beta = c(beta)
+# true_beta = c(beta0, beta)
+true_beta = c(beta)
 true_beta
 true_sigma = c(sigma_u, sigma_v_hosp, sigma_v_slope_hosp)
 true_sigma
@@ -235,7 +235,24 @@ abline(a = 0, b = 1, lwd = 2)
 
 
 
+```{r, eval = T, warning=F}
+three_lvl_dat$site = factor(three_lvl_dat$site)
+three_lvl_dat$patient = factor(three_lvl_dat$patient)
+three_lvl_dat$visit = factor(three_lvl_dat$visit)
 
+model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + 
+              (1 | site) + (site + X1 + X2 + X3 + X4 + X5| site: patient), 
+              data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
+                                                        optCtrl  = list(method="L-BFGS-B")))
+
+# summary(model)
+
+fixed_effects <- fixef(model)
+fixed_effects
+
+vc <- VarCorr(model)
+vc
+```
 
 
 
@@ -262,6 +279,7 @@ id.site <- rearranged_data$site
 
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 ```
+
 
 ```{r}
 source("DLMM_Engine_RI_BFGS.R")

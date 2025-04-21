@@ -61,11 +61,11 @@ lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weigh
     # non_zero_columns <- colSums(Zh != 0) > 0
     # Zh <- Zh[, non_zero_columns, drop = FALSE]
 
-    ShX  = t(Xh*wth) %*% Xh
-    ShXZ = t(Xh*wth) %*% Zh
-    ShXY = t(Xh*wth) %*% Yh
-    ShZ  = t(Zh*wth) %*% Zh
-    ShZY = t(Zh*wth) %*% Yh
+    ShX  <- crossprod((Xh * wth), Xh)
+    ShXZ <- crossprod((Xh * wth), Zh)
+    ShXY <- crossprod((Xh * wth), Yh)
+    ShZ  <- crossprod((Zh * wth), Zh)
+    ShZY <- crossprod((Zh * wth), Yh)
     ShY  = sum(Yh ^ 2 *wth)
     Nh <- sum(id.site == sh)
     mh = m_h_all[h,]
@@ -139,9 +139,10 @@ lmm.profile3 <- function(par, pooled = FALSE, reml = TRUE,
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
-    remlterm <- log(det(bterm1))
     s2 <- qterm / (N - px)
-    lp <- -(lpterm1 + qterm + remlterm) / 2
+    remlterm <- determinant(bterm1 / s2, logarithm = TRUE)$modulus
+    # lp <- -(lpterm1 + qterm + remlterm) / 2
+    lp <- -(lpterm1 + N * log(s2) + qterm/s2 + remlterm) / 2
   } else {
     s2 <- qterm / N
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2

@@ -122,12 +122,14 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
 
   L <- chol(bterm1)
   b <- backsolve(L, forwardsolve(t(L), bterm2))
+
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
 
   if (reml) {
-    remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
-    s2 <- qterm / (N - df)
-    lp <- -(lpterm1 + qterm + remlterm) / 2
+    s2 <- qterm / (N - px)
+    remlterm <- determinant(bterm1 / s2, logarithm = TRUE)$modulus
+    # lp <- -(lpterm1 + qterm + remlterm) / 2
+    lp <- -(lpterm1 + N * log(s2) + qterm/s2 + remlterm) / 2
   } else {
     s2 <- qterm / N
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
@@ -179,7 +181,7 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     mypar <- res$par
     res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ)
     s2 <- res.profile$s2
-    V <- mypar
+    V <- mypar * s2
   }
 
   return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))

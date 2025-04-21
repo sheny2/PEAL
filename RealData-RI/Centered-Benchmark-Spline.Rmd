@@ -149,7 +149,7 @@ plot(density(Y))
 
 
 ```{r}
-source("DLMM_Engine_RI_BFGS.R")
+source("DLMM_Engine_RI_P.R")
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       id.site = NULL, weights = NULL,
                       pooled = F, reml = T,
@@ -161,7 +161,8 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
 est_beta = c(fit03.dlmm$b[1:px])
 true_beta = c(beta)
 cbind(est_beta, true_beta)
-fit03.dlmm$b
+
+fit03.dlmm$b[-c(1:px)]
 
 
 
@@ -200,41 +201,5 @@ summary(model_lmer)
 
 plot(fit03.dlmm$b, fixed.effects(model_lmer))
 abline(a = 0, b = 1, col = "blue", lwd = 2)
-```
-
-
-```{r}
-library(nlme)
-
-# Fit model with hospital-specific patient variance
-model_nlme <- lme(
-  fixed = Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9,
-  random = list(site = ~ 1, patient = ~ 1),  # patient nested in site
-  weights = varIdent(form = ~ 1 | site),     # different residual variance per site
-  data = three_lvl_dat
-)
-
-# Check variance estimates
-VarCorr(model_nlme)
-```
-
-
-
-```{r}
-library(brms)
-
-# Fit model with hospital-specific patient variance
-model_brms <- brm(
-  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
-    (1 | site) + (site | site:patient),
-  # prior = set_prior("normal(0, 5)"),  # Weakly informative priors
-  data = three_lvl_dat,
-  chains = 1, iter = 5000  # Short MCMC for demonstration
-)
-
-# Extract variance components
-# plot(model_brms)
-summary(model_brms)
-ranef(model_brms)  # Random effects per site/patient
 ```
 
