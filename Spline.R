@@ -1,15 +1,18 @@
 library(splines)
 library(ggplot2)
 
-x <- seq(0, 10, length.out = 100)
-y <- cos(x) + rnorm(100, sd = 0.3)
+N = 1000
+x <- seq(0, 10, length.out = N)
+y <- cos(x) + rnorm(N, sd = 0.5)
 data <- data.frame(x, y)
+plot(x,y)
 
 # Linear model without spline
 lm_linear <- lm(y ~ x, data = data)
 
 # Model with natural cubic spline (3 degrees of freedom)
 lm_spline <- lm(y ~ ns(x, df = 3), data = data)
+lm_spline <- lm(y ~ poly(x, 3), data = data)
 
 summary(lm_linear)
 summary(lm_spline)
