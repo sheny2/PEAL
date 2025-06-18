@@ -11,12 +11,12 @@ num_cores <- detectCores()
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
-N = 50
+N = 100
 
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(80:100, H) # of patients (1k to 3k later)
+m_hosp <- sample(40:60, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X
@@ -26,10 +26,10 @@ p_cont <- px - p_bin  # of continuous X
 beta0 = 0 # intercept (No intercept, only px)
 beta <- c(2, 4, 6, 8, 10, 3, 5, 7, 9)  # Fixed effects for covariates
 
-sigma_e <- 2  # error variance
+sigma_e <- 3  # error variance
 sigma_u <- 3 # site-level variance
-# sigma_v_hosp <- runif(H, min = 1, max = 3)  # Varying sigma_v by hospital
-sigma_v_hosp <- 1:H
+sigma_v_hosp <- runif(H, min = 1, max = 3)  # Varying sigma_v by hospital
+# sigma_v_hosp <- 1:H
 
 # result_beta = matrix(nrow = (px+1), ncol = N)
 # rownames(result_beta) <- paste0("Beta", 0:(px))
@@ -172,6 +172,25 @@ beta_df %>% mutate(Bias = Estimate - True_Value) %>%
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# beta_df %>%
+# mutate(Bias = Estimate - True_Value,
+#        # Create a variable for parameter type
+#        param_type = ifelse(Parameter %in% unique(Parameter)[1:5],
+#                            "Binary",
+#                            "Continuous")) %>%
+#   ggplot(aes(x = Parameter, y = Bias, color = param_type)) +
+#   geom_jitter(alpha = 0.1, width = 0.2) +
+#   geom_boxplot(aes(fill = param_type), alpha = 0.6) +
+#   scale_color_manual(name = "Variable Type",
+#                      values = c("Binary" = "#E69F00",
+#                                 "Continuous" = "#56B4E9")) +
+#   scale_fill_manual(name = "Variable Type",
+#                     values = c("Binary" = "#E69F00",
+#                                "Continuous" = "#56B4E9")) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1),
+#         legend.position = "bottom") +
+#   labs(title = "Bias in Parameter Estimates")
 
 
 sigma_df %>% mutate(Bias = Estimate - True_Value) %>%

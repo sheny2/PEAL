@@ -14,7 +14,7 @@ library(data.table)
 library(gridExtra)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-source("DLMM_Engine_RI_BFGS.R")
+source("DLMM_Engine_RI_P.R")
 ```
 
 
@@ -81,7 +81,7 @@ three_lvl_dat <- data.table(
 setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), "Y"))
 
 
-# Add a time variable (e.g., visit order or actual time)
+# Add a time variable (e.g., visit time)
 three_lvl_dat <- three_lvl_dat %>%
   group_by(site, patient) %>%
   mutate(
@@ -90,12 +90,15 @@ three_lvl_dat <- three_lvl_dat %>%
   ) %>%
   ungroup() %>%
   mutate(
-    # time_effect = 0.5 * visit_time - 0.03 * (visit_time)^2,
-    time_effect = cos(visit_time),
+    time_effect = 0.5 * visit_time - 0.03 * (visit_time)^2,
+    # time_effect = cos(visit_time),
     Y = Y + time_effect  # Add to existing outcome
   )
+```
 
 
+
+```{r, eval = F, warning=F}
 three_lvl_dat %>% filter(site == 1) %>% mutate(patient = factor(patient)) %>%
   ggplot(aes(x = X9, y = Y, colour = patient, group = patient)) +
   geom_point(alpha = 0.5) + 
@@ -104,13 +107,89 @@ three_lvl_dat %>% filter(site == 1) %>% mutate(patient = factor(patient)) %>%
   theme(legend.position = "none")
 
 three_lvl_dat %>% mutate(patient = factor(patient)) %>% 
-  filter(site == 1) %>% group_by(patient) %>% filter(max(visit)>10) %>%
+  filter(site == 1) %>% group_by(patient) %>% 
   ggplot(aes(x = visit_time, y = Y, colour = patient, group = patient)) +
   geom_point(alpha = 0.5) + 
-  geom_smooth(se = F, size = .3) +
+  geom_smooth(se = F, size = .3) + labs(x = "Visit Time") + 
   geom_smooth(aes(visit_time, Y, group = 1), se = F) + theme(legend.position = "none")
 
+plot(density(three_lvl_dat$Y))
+```
 
+```{r}
+three_lvl_dat %>% 
+  mutate(site = factor(site)) %>% 
+  ggplot(aes(visit_time, fill = site)) + geom_histogram() + facet_wrap(~site) + 
+  labs(x = "Visit Time") + theme(legend.position = "none")
+
+three_lvl_dat %>% 
+  mutate(site = factor(site)) %>% 
+  ggplot(aes(visit_time, col = 5, fill = site, group = site)) + geom_histogram()  + 
+  labs(x = "Visit Time") + theme(legend.position = "none")
+   
+knots <- quantile(three_lvl_dat$visit_time, probs = c(0.25, 0.5, 0.75))
+# seq(0.1, 0.9, length.out = 5)
+```
+
+
+
+
+```{r}
+compute_site_histograms <- function(df, bin_edges) {
+    h <- hist(df$visit_time, 
+              breaks = seq(0, 300, length.out = bin_edges), 
+              plot = FALSE)
+    return(list(counts = h$counts, bin_edges = h$breaks))
+}
+
+bin_edges = 50
+site_histogram1 = compute_site_histograms(three_lvl_dat[three_lvl_dat$site == 1,], bin_edges)
+site_histogram2 = compute_site_histograms(three_lvl_dat[three_lvl_dat$site == 2,], bin_edges)
+site_histogram3 = compute_site_histograms(three_lvl_dat[three_lvl_dat$site == 3,], bin_edges)
+site_histogram4 = compute_site_histograms(three_lvl_dat[three_lvl_dat$site == 4,], bin_edges)
+site_histogram5 = compute_site_histograms(three_lvl_dat[three_lvl_dat$site == 5,], bin_edges)
+
+site_histograms = list(site_histogram1, site_histogram2, site_histogram3, site_histogram4, site_histogram5)
+
+all_edges <- lapply(site_histograms, function(h) h$bin_edges)
+all_counts <- lapply(site_histograms, function(h) h$counts)
+global_counts <- Reduce(`+`, all_counts)
+
+# Compute quantiles from aggregated counts
+bin_midpoints <- (all_edges[[1]][-1] + all_edges[[1]][-length(all_edges[[1]])]) / 2
+ecdf <- cumsum(global_counts) / sum(global_counts)
+
+find_quantile <- function(p) {
+  idx <- max(which(ecdf <= p))
+  if (idx == length(ecdf)) return(all_edges[[1]][length(all_edges[[1]])])
+  if (idx == 0) return(all_edges[[1]][1])
+  
+  p_low <- ifelse(idx == 0, 0, ecdf[idx])
+  p_high <- ecdf[idx + 1]
+  w <- (p - p_low) / (p_high - p_low)
+  bin_midpoints[idx] + w * (bin_midpoints[idx + 1] - bin_midpoints[idx])
+}
+
+quantiles <- c("0.25" = find_quantile(0.25), "0.5" = find_quantile(0.5), "0.75" = find_quantile(0.75))
+
+list(
+  global_counts = global_counts,
+  bin_edges = all_edges[[1]],
+  quantiles = quantiles
+)
+```
+
+```{r}
+quantile(three_lvl_dat$visit_time, probs = c(0.25, 0.5, 0.75))
+```
+
+
+```{r}
+knots = quantiles
+```
+
+
+```{r}
 # Preprocessing
 # Calculate the number of visits per patient per site
 visit_count <- three_lvl_dat %>%
@@ -126,9 +205,11 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 # XYZ
 Y <- rearranged_data$Y 
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-T_ns = ns(rearranged_data$visit_time, 3) %>% as.matrix(ncol = 3)
+T_ns = ns(rearranged_data$visit_time, knots = knots) %>% as.matrix()
 X <- cbind(X, T_ns)
 Z <- list()
+
+
 
 for(i in 1:H){
   count_mat = rearranged_data %>%
@@ -142,8 +223,6 @@ for(i in 1:H){
 id.site <- rearranged_data$site
 
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
-
-plot(density(Y))
 ```
 
 
@@ -158,48 +237,59 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       corstr = 'independence',
                       mypar.init = NULL)
 
-est_beta = c(fit03.dlmm$b[1:px])
+dlmm_beta = c(fit03.dlmm$b[1:px])
 true_beta = c(beta)
 cbind(est_beta, true_beta)
 
-fit03.dlmm$b[-c(1:px)]
-
+dlmm_spline = fit03.dlmm$b[-c(1:px)]
 
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
+dlmm_sigma = c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2))
 
-true_sigma = c(sigma_u, sigma_v_hosp)
-true_sigma
-c(sigma_e)
+true_sigma = c(sigma_u, sigma_v_hosp, sigma_e)
+cbind(dlmm_sigma, true_sigma)
 
 
-plot(est_beta, true_beta)
+plot(dlmm_beta, true_beta)
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 
-plot(sqrt(fit03.dlmm$V), true_sigma)
-points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+plot(dlmm_sigma, true_sigma)
+points(dlmm_sigma[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 
-```{r}
+```{r, warning=F}
 three_lvl_dat$site = factor(three_lvl_dat$site)
 three_lvl_dat$patient = factor(three_lvl_dat$patient)
 three_lvl_dat$visit = factor(three_lvl_dat$visit)
 
-# Fit with natural cubic spline (3 knots) for time
-model_lmer <- lmer(
-  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
-      ns(visit_time, df = 3) +      # Spline for time (3 degrees of freedom)
-      (1 | site) + (1 | site:patient),
-  data = three_lvl_dat
-)
+# Fit with natural cubic spline for time
+model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
+              ns(visit_time, knots = knots) +      # Spline for time
+              (1 | site) + (-1 + site || site: patient), 
+              data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
+                                                        optCtrl  = list(method="L-BFGS-B")))
 
-summary(model_lmer)
+model_summ = summary(model)
 
+lmer_beta <- fixef(model)[1:px]
+lmer_spline <- fixef(model)[-c(1:px)]
 
-plot(fit03.dlmm$b, fixed.effects(model_lmer))
-abline(a = 0, b = 1, col = "blue", lwd = 2)
+vc <- VarCorr(model)
+
+lmer_sigma = c(
+sqrt(model_summ$varcor$site),
+diag(sqrt(model_summ$varcor$`site:patient`)),
+model_summ$sigma)
 ```
+
+```{r}
+cbind(dlmm_beta, lmer_beta, true_beta)
+cbind(dlmm_sigma, lmer_sigma, true_sigma)
+cbind(dlmm_spline, lmer_spline)
+```
+
 

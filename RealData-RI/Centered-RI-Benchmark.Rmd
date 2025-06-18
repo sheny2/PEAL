@@ -110,9 +110,15 @@ for(i in 1:H){
 id.site <- rearranged_data$site
 
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+
+
+# plot(density(Y), main = "Density of Y")
+# plot(density(X[,9]), main = "Density of X9")
+# lines(density(rnorm(1000, 0 , 5)))
 ```
 
-```{r}
+
+```{r, eval = F}
 source("DLMM_Engine_RI_P.R")
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       id.site = NULL, weights = NULL,
@@ -158,10 +164,11 @@ cbind(est_beta, true_beta)
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
+est_sigma = c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2))
 
 true_sigma = c(sigma_u, sigma_v_hosp)
-true_sigma
-c(sigma_e)
+# true_sigma
+# c(sigma_e)
 
 
 plot(fit03.dlmm$b, true_beta)
@@ -178,17 +185,31 @@ three_lvl_dat$patient = factor(three_lvl_dat$patient)
 three_lvl_dat$visit = factor(three_lvl_dat$visit)
 
 model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + 
-              (1 | site) + (site || site: patient), 
+              (1 | site) + (-1 + site || site: patient), 
               data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
                                                         optCtrl  = list(method="L-BFGS-B")))
 
-# summary(model)
+model_summ = summary(model)
 
 fixed_effects <- fixef(model)
 fixed_effects
 
 vc <- VarCorr(model)
 vc
+
+random_effects = c(
+sqrt(model_summ$varcor$site),
+diag(sqrt(model_summ$varcor$`site:patient`)),
+model_summ$sigma)
+
+cbind(est_beta, fixed_effects, true_beta)
+cbind(est_sigma, random_effects, true_sigma)
+```
+
+
+```{r}
+fit03.dlmm$res
+summary(model)
 ```
 
 

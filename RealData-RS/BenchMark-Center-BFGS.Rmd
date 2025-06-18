@@ -22,7 +22,7 @@ source("DLMM_Engine_RS_BFGS.R")
 ##############################
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(10:20, H, replace = T) # Number of patients per site
+m_hosp <- sample(20:30, H, replace = T) # Number of patients per site
 
 px <- 5  # Number of covariates
 p_bin <- 2  # Number of binary covariates
