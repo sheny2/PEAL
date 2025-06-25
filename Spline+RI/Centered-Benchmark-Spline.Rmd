@@ -14,7 +14,7 @@ library(data.table)
 library(gridExtra)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-source("DLMM_Engine_RI_P.R")
+source("DLMM_Engine_RI_P2.R")
 ```
 
 
@@ -228,7 +228,7 @@ ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 
 
 ```{r}
-source("DLMM_Engine_RI_P.R")
+source("DLMM_Engine_RI_P2.R")
 fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
                       id.site = NULL, weights = NULL,
                       pooled = F, reml = T,
@@ -292,4 +292,10 @@ cbind(dlmm_sigma, lmer_sigma, true_sigma)
 cbind(dlmm_spline, lmer_spline)
 ```
 
+
+```{r}
+cbind(dlmm_beta, fit03.dlmm$lb[1:px], fit03.dlmm$ub[1:px])
+fit03.dlmm$b.sd
+summary(model)
+```
 

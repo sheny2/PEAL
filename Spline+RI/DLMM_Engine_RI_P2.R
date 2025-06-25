@@ -108,12 +108,8 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
     lpterm1 <- lpterm1 + logdet
 
     # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
-
-    # L_Wh <- chol(Vinv + ShZ)
-    # Wh <- chol2inv(L_Wh)
-    epsilon <- 1e-6
-    diag_adjustment <- epsilon * diag(nrow(Vinv))
-    Wh <- chol2inv(chol(Vinv + ShZ + diag_adjustment))
+    L_Wh <- chol(Vinv + ShZ)
+    Wh <- chol2inv(L_Wh)
 
     bterm1 <- bterm1 + (ShX - ShXZ %*% Wh %*% t(ShXZ))
     bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh %*% ShZY)
@@ -142,6 +138,9 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
                               bterm1 = bterm1, bterm2 = bterm2))
   return(res)
 }
+
+
+
 
 # Function to fit 3-level DLMM
 lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL,
@@ -190,5 +189,21 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     V <- mypar * s2
   }
 
-  return(list(b = res.profile$b, V = V, s2 = s2, res = res, res.profile = res.profile))
+  ## New added
+  ## Inference (Wald test statistic)
+  vd <- diag(solve(res.profile$allterms$bterm1))
+  if(common.s2==T) vd <- diag(solve(res.profile$allterms$bterm1 / s2))  # scale back
+  wald <- res.profile$b / sqrt(vd)
+
+  ## 95% CI for fixed effects
+  lb <- res.profile$b -  1.96 * sqrt(vd)
+  ub <- res.profile$b +  1.96 * sqrt(vd)
+
+
+  return(list(b = res.profile$b,
+              b.sd = sqrt(vd),     # sd of fixed effect est
+              wald = wald,   # Wald-test statistic
+              lb = lb,
+              ub = ub,
+              V = V, s2 = s2, res = res, res.profile = res.profile))
 }
