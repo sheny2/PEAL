@@ -189,7 +189,6 @@ lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NUL
     V <- mypar * s2
   }
 
-  ## New added
   ## Inference (Wald test statistic)
   vd <- diag(solve(res.profile$allterms$bterm1))
   if(common.s2==T) vd <- diag(solve(res.profile$allterms$bterm1 / s2))  # scale back

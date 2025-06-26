@@ -1,0 +1,188 @@
+---
+title: "Benchmark"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(1917)
+source("DLMM_Engine-Multi-New.R")
+```
+
+
+```{r}
+# Parameters
+H <- 5  # Number of sites
+m_hosp <- sample(50:100, H, replace = TRUE)  # Number of patients per site
+px <- 9  # Number of covariates
+p_bin <- 5  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+py <- 3 # Number of outcomes (multivariate)
+
+# Fixed effects
+beta0 <- rnorm(py, 0, 1)  # Intercept for each outcome
+beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)  # Fixed effects for covariates
+
+# Variance components
+sigma_u <- 3  # Site-level variance
+sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
+
+# Exchangeable correlation structure
+sigma_e <- 2  # Error variance
+rho <- 0.5 # Correlation between outcomes
+rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
+diag(rho_mat) <- 1  # Diagonal elements are 1
+
+
+# Generate data
+nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)  # Hospital ID
+id.pat <- sequence(nn)  # Patient ID
+n_visits <- sample(1:30, sum(nn), replace = TRUE)  # Number of visits per patient
+
+# Expand hospital and patient IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Random effects
+u_h <- rnorm(H, mean = 0, sd = sigma_u)  # Hospital effects
+v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))  # Patient effects varying by hospital
+
+# Expansion of hospital effects
+u_h_patient <- rep(u_h, times = m_hosp)
+u_h_expanded <- rep(u_h_patient, times = n_visits)
+
+# Expansion of patient effects
+v_hi_expanded <- rep(v_hi, times = n_visits)
+
+# Covariates
+X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
+
+# Generate multivariate errors with exchangeable correlation
+epsilon_hij <- mvrnorm(sum(n_visits), mu = rep(0, py), 
+                       Sigma = diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py))
+
+# Compute outcomes
+Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
+for (k in 1:py) {
+  Y_hij[, k] <- beta0[k] + X_hij %*% beta[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
+}
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij, Y_hij
+) %>% data.frame()
+
+setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), paste0("Y", 1:py)))
+
+# Preprocessing
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+
+# XYZ
+Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+X <- cbind(1, X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+    filter(site == i) %>%
+    group_by(site, patient) %>%
+    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data$site
+
+# ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+ShXYZ_multi <- lmm.get.summary3.multivariate(Y, X, Z, id.site)
+
+cor(Y)
+```
+
+```{r}
+rbind(beta0, beta)
+sigma_u 
+sigma_v_hosp 
+sigma_e
+diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+```
+
+
+```{r}
+source("DLMM-Engine-Multi2.R")
+ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
+
+fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+
+
+fit03.dlmm$b
+
+sqrt(fit03.dlmm$V)
+sqrt(fit03.dlmm$s2)
+
+
+par(mfrow = c(1, py))  
+for (i in 1:py) {
+  plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
+  points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
+  abline(a = 0, b = 1, col = "blue", lwd = 1)
+}
+
+par(mfrow = c(1, 1))  
+plot(sqrt(fit03.dlmm$V), true_sigma)
+points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+```
+
+
+
+
+
+```{r}
+res <- federated_lmm_multivariate(Y, X, Z, id.site)
+res
+```
+
+
+
+```{r, eval = F}
+# Fit the model
+fit_multi <- lmm.fit3.multivariate(Y = Y, X = X, Z = Z, id.site = id.site, 
+                                  ShXYZ = ShXYZ_multi, reml = TRUE)
+
+# Results
+print(fit_multi$B)  # Fixed effects estimates
+print(fit_multi$Sigma_e)  # Residual covariance
+print(fit_multi$V)  # Random effects variances
+```
+
+
+
