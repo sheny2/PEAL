@@ -97,23 +97,21 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
 
     return(-loglik)
   }
-
   # Optimize covariance parameters
   opt <- optim(par.init, neg_loglik, method = "L-BFGS-B", hessian = T,
                lower = c(rep(1e-6, K+1), rep(-Inf, py*(py+1)/2)))
-
-  cat("The number of function evaluations used is", opt$counts[1], '\n')
 
   # Extract and return estimated parameters
   sigma_u <- opt$par[1]
   sigma_v <- opt$par[2:(K+1)]
   Sigma_e_params <- opt$par[(K+2):length(opt$par)]
 
-  cat(sigma_u, '\n' sigma_v, '\n' Sigma_e)
-
   L <- matrix(0, py, py)
   L[lower.tri(L, diag = TRUE)] <- Sigma_e_params
   Sigma_e <- tcrossprod(L)
+  
+  cat("Number of function evaluations used to estimate D and Sigma:", opt$counts[1], '\n')
+  cat(sigma_u, '\n', sigma_v, '\n', Sigma_e, '\n')
 
   list(sigma_u = sigma_u, sigma_v = sigma_v, Sigma_e = Sigma_e, opt = opt)
 }

@@ -20,7 +20,7 @@ source("DLMM_Engine-Multi-New.R")
 ```{r}
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(50:100, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(50:55, H, replace = TRUE)  # Number of patients per site
 px <- 9  # Number of covariates
 p_bin <- 5  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -144,10 +144,12 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
 
 
 fit03.dlmm$b
+true_beta = rbind(beta0, beta)
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
 
+true_sigma = c(sigma_u, sigma_v_hosp)
 
 par(mfrow = c(1, py))  
 for (i in 1:py) {
@@ -171,6 +173,12 @@ res <- federated_lmm_multivariate(Y, X, Z, id.site)
 res
 ```
 
+```{r}
+source("DLMM_Engine-Multi-New2.R")
+res <- federated_lmm_multivariate(Y, X, Z, id.site)
+res
+sqrt(diag(res$D))
+```
 
 
 ```{r, eval = F}
