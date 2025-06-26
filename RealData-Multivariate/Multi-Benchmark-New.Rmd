@@ -20,7 +20,7 @@ source("DLMM_Engine-Multi-New.R")
 ```{r}
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(50:55, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(30:40, H, replace = TRUE)  # Number of patients per site
 px <- 9  # Number of covariates
 p_bin <- 5  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -122,15 +122,19 @@ cor(Y)
 ```
 
 ```{r}
-rbind(beta0, beta)
-sigma_u 
-sigma_v_hosp 
+true_beta = rbind(beta0, beta)
+true_beta
+
+
+true_sigma = c(sigma_u, sigma_v_hosp)
+true_sigma
+
 sigma_e
 diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
 ```
 
 
-```{r}
+```{r, eval = F}
 source("DLMM-Engine-Multi2.R")
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 
@@ -168,7 +172,7 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 
 
-```{r}
+```{r, eval = F}
 res <- federated_lmm_multivariate(Y, X, Z, id.site)
 res
 ```
@@ -176,9 +180,26 @@ res
 ```{r}
 source("DLMM_Engine-Multi-New2.R")
 res <- federated_lmm_multivariate(Y, X, Z, id.site)
-res
+
+res$B
 sqrt(diag(res$D))
+
+
+par(mfrow = c(1, py))  
+for (i in 1:py) {
+  plot(res$B[,i], true_beta[,i], main = paste("Beta", i))
+  points(res$B[,i][1], true_beta[,i][1], col = "red")
+  abline(a = 0, b = 1, col = "blue", lwd = 1)
+}
+
+par(mfrow = c(1, 1))  
+plot(sqrt(diag(res$D)), true_sigma)
+points(sqrt(diag(res$D))[1], true_sigma[1], col = "red")
+abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
+
+
+
 
 
 ```{r, eval = F}
