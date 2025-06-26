@@ -7,7 +7,7 @@ source("DLMM_Engine_RI_P.R")
 # source("DLMM_Engine_RI_NP.R")
 
 # Define number of cores for parallel execution
-num_cores <- detectCores()
+num_cores <- detectCores() - 2
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
@@ -16,7 +16,7 @@ N = 100
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(40:60, H) # of patients (1k to 3k later)
+m_hosp <- sample(140:160, H) # of patients (1k to 3k later)
 
 px <- 9  # of covariates
 p_bin <- 5  # of binary X

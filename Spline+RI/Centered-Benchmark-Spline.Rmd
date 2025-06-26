@@ -24,7 +24,7 @@ source("DLMM_Engine_RI_P2.R")
 
 # Parameters
 H <- 5  # of sites
-m_hosp <- sample(50:100, H, replace = T) # of patients (1k to 3k later)
+m_hosp <- sample(250:300, H, replace = T) # of patients (1k to 3k later)
 
 
 px <- 9  # of covariates
@@ -239,7 +239,7 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
 
 dlmm_beta = c(fit03.dlmm$b[1:px])
 true_beta = c(beta)
-cbind(est_beta, true_beta)
+cbind(dlmm_beta, true_beta)
 
 dlmm_spline = fit03.dlmm$b[-c(1:px)]
 
