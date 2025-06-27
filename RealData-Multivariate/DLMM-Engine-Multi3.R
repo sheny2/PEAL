@@ -1,12 +1,7 @@
+
 library(tidyverse)
 library(data.table)
 library(Matrix)
-
-create_block_matrix <- function(Sigma, M, rho) {
-  N <- nrow(Sigma)
-  block_matrix <- kronecker(matrix(rho, M, M), Sigma) - kronecker(diag(M), rho*Sigma) + kronecker(diag(M), Sigma)
-  return(block_matrix)
-}
 
 # Function to generate the record count matrix for a single hospital
 generate_record_count <- function(data) {
@@ -44,29 +39,22 @@ lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weigh
   id.site <- as.character(id.site)
   id.site.uniq <- unique(id.site)
   px <- ncol(X)
-  py <- ncol(Y)
 
   ShXYZ <- list()
   for (h in seq_along(id.site.uniq)) {
     sh <- id.site.uniq[h]
-    # wth <- weights[id.site == sh]
+    wth <- weights[id.site == sh]
     Xh <- X[id.site == sh, ]
-    Yh <- matrix(Y[id.site == sh, ], ncol = 1)
+    Yh <- Y[id.site == sh, ]
     Zh <- Z[h][[1]]
 
-    # Xh <- kronecker(matrix(1, py, 1), Xh)
-    # Zh <- kronecker(matrix(1, py, 1), Zh)
-    Xh <- kronecker(diag(py), Xh) # larger format, dimension times py
-    Zh <- kronecker(diag(py), Zh)
-
-    ShX  <- crossprod(Xh, Xh)
-    ShXZ <- crossprod(Xh, Zh)
-    ShXY <- crossprod(Xh, Yh)
-    ShZ  <- crossprod(Zh, Zh)
-    ShZY <- crossprod(Zh, Yh)
-    ShY  <- sum(Yh^2)
+    ShX  <- t(Xh) %*% Xh
+    ShXZ <- t(Xh * wth) %*% Zh
+    ShXY <- t(Xh * wth) %*% Yh
+    ShZ  <- t(Zh * wth) %*% Zh
+    ShZY <- t(Zh * wth) %*% Yh
+    ShY  <- t(Yh) %*% (Yh * wth)  # ShY is now a matrix of size (py by py)
     Nh <- sum(id.site == sh)
-
 
     ShXYZ[[sh]] <- list(ShX = ShX, ShXZ = ShXZ, ShXY = ShXY,
                         ShZ = ShZ, ShZY = ShZY, ShY = ShY, Nh = Nh)
@@ -75,10 +63,9 @@ lmm.get.summary3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weigh
   return(ShXYZ)
 }
 
-
-lmm.profile03Multi <- function(par, pooled = FALSE, reml = TRUE,
+lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
                           Y, X, Z, id.site, weights = NULL,
-                          ShXYZ, corstr, rcpp = FALSE, py = NULL) {
+                          ShXYZ, corstr, rcpp = FALSE) {
   if (pooled) {
     id.site.uniq <- unique(id.site)
     px <- ncol(X)
@@ -87,11 +74,12 @@ lmm.profile03Multi <- function(par, pooled = FALSE, reml = TRUE,
     id.site.uniq <- names(ShXYZ)
     px <- ncol(ShXYZ[[1]]$ShX)
     pz <- length(id.site.uniq) + 1
+    py = ncol(ShXYZ[[1]]$ShY)
   }
 
   lpterm1 <- lpterm2 <- remlterm <- 0
-  bterm1 <- matrix(0, px, px)
-  bterm2 <- rep(0, px)
+  bterm1 <- matrix(0, px, px)   # bterm1 is still px x px
+  bterm2 <- matrix(0, px, py)   # bterm2 is now px x py
   Wh <- list()
   N <- 0
 
@@ -111,77 +99,78 @@ lmm.profile03Multi <- function(par, pooled = FALSE, reml = TRUE,
     if(corstr == 'independence'){
       sigma_u2 = par[1]
       sigma_vh2 = par[1 + h]
+      V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
       s2 = tail(par, 1)
-
-      a_h = pzh/py
-      V <- diag(c(sigma_u2, rep(sigma_vh2, (a_h - 1))), a_h)
-      V <- create_block_matrix(Sigma = V, M = py, rho = 0)
-    }
-
-    else if(corstr == 'exchangeable'){
+      Sigma_e <- diag(s2, py)  # Independent residuals
+    }else if(corstr == 'exchangeable'){
       sigma_u2 = par[1]
       sigma_vh2 = par[1 + h]
-      s2 = tail(par, 3)[1]
-      rho_v = tail(par, 3)[2]
-      rho = tail(par, 3)[3]
+      V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
+      s2 = par[pz + 1]
+      rho = tail(par, 1)
 
-      a_h = pzh/py
-      V <- diag(c(sigma_u2, rep(sigma_vh2, (a_h - 1))), a_h)
-      V <- create_block_matrix(Sigma = V, M = py, rho = 0)
-      V <- replace(V, V == 0, rho)
-
-      # D <- diag(sqrt(sigma_vh2), pzh)
-      # a_h = pzh/py
-      # D[1,1] = sqrt(sigma_u2)
-      # D[1+a_h,1+a_h] = sqrt(sigma_u2)
-      # D[1+a_h*2,1+a_h*2] = sqrt(sigma_u2)
-      # # a_h = pzh/py
-      # # D <- diag(c(sigma_u2, rep(sigma_vh2, (a_h - 1))), a_h)
-      # # D <- create_block_matrix(Sigma = D, M = py, rho = 0)
-      # # D <- sqrt(D)
-      # V <- D %*% (matrix(rho, pzh, pzh) + diag(1 - rho, pzh)) %*% D
+      # Create exchangeable Sigma_e
+      Sigma_e <- matrix(rho * s2, py, py)
+      diag(Sigma_e) <- s2
     }
 
-    Vinv <- solve(V)
+    Vinv <- solve(V, diag(nrow(V)))  # Inverse of V
+    Sigma_e_inv <- solve(Sigma_e)
 
-    # Compute the log-determinant
-    A <- diag(1, ncol(V)) + ShZ %*% V / s2
-    logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus) + py * Nh * log(s2)
-    lpterm1 <- lpterm1 + logdet
+    # log-determinant calculation
+    A <- diag(nrow(V)) + ShZ %*% V %*% Sigma_e_inv[1,1]  # Using [1,1] since we're scaling by first element
+    logdet_V <- as.numeric(determinant(A, logarithm = TRUE)$modulus)
+    logdet_Sigma_e <- as.numeric(determinant(Sigma_e, logarithm = TRUE)$modulus)
+    lpterm1 <- lpterm1 + logdet_V + Nh * logdet_Sigma_e
 
-    # Compute Wh[[h]] using Cholesky decomposition of (Vinv + ShZ)
-    # L_Wh <- chol(s2 * Vinv + ShZ)
-    # Wh[[h]] <- chol2inv(L_Wh)
-    Wh[[h]] <- solve(s2 * Vinv + ShZ)
+    Wh[[h]] = solve(kronecker(Sigma_e_inv, V) + kronecker(diag(py), ShZ))
 
-    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ)) / s2
-    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY) / s2
-    lpterm2 <- lpterm2 + (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY) / s2
+    # Update terms using the correct covariance structure
+    bterm1 <- bterm1 + kronecker(Sigma_e_inv, ShX) -
+      kronecker(Sigma_e_inv, ShXZ) %*% Wh[[h]] %*% kronecker(Sigma_e_inv, t(ShXZ))
+
+    bterm2 <- bterm2 + (ShXY %*% Sigma_e_inv -
+                          kronecker(Sigma_e_inv, ShXZ) %*% Wh[[h]] %*%
+                          kronecker(diag(py), ShZY) %*% Sigma_e_inv)
+
+    # Calculate the quadratic form term
+    M <- Sigma_e_inv %*% ShY %*% Sigma_e_inv -
+      t(ShZY) %*% Wh[[h]] %*% ShZY %*% Sigma_e_inv
+    lpterm2 <- lpterm2 + sum(diag(M))
   }
 
-  b = solve(bterm1, bterm2)
-  qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * b) + t(b) %*% bterm1 %*% b)
+  b <- solve(bterm1, bterm2)
+
+  # Calculate the quadratic term
+  tb_bterm1_b <- t(b) %*% bterm1 %*% b  # py by py
+  qterm <- lpterm2 - 2 * sum(bterm2 * b) + sum(diag(tb_bterm1_b))
 
   if (reml) {
-    remlterm <- determinant(bterm1, logarithm = TRUE)$modulus
+    remlterm <- as.numeric(determinant(bterm1, logarithm = TRUE)$modulus)
     lp <- -(lpterm1 + qterm + remlterm) / 2
   } else {
-    lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / N)) * N) / 2
+    cat("Use REML version for better prediction")
   }
 
-  res <- list(lp = lp, b = b, s2 = s2,
-              allterms = list(lpterm1 = lpterm1, lpterm2 = lpterm2,
-                              qterm = qterm, remlterm = remlterm,
-                              bterm1 = bterm1, bterm2 = bterm2))
+  res <- list(
+    lp = lp,
+    b = b,       # (px x py)
+    s2 = s2,
+    rho = ifelse(corstr == 'exchangeable', rho, NA),
+    allterms = list(
+      lpterm1 = lpterm1, lpterm2 = lpterm2,
+      qterm   = qterm, remlterm= remlterm,
+      bterm1  = bterm1, bterm2  = bterm2
+    )
+  )
   return(res)
 }
 
 
-# Function to fit 3-level DLMM
-lmm.fit3Multi <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL,
+lmm.fit3 <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL,
                      pooled = FALSE, reml = TRUE, common.s2 = TRUE,
                      ShXYZ = list(), corstr = 'independence',
-                     mypar.init = NULL, hessian = FALSE, verbose = TRUE, py = NULL) {
+                     mypar.init = NULL, hessian = FALSE, verbose = TRUE) {
   if (pooled) {
     id.site.uniq <- unique(id.site)
     K <- length(id.site.uniq)
@@ -193,9 +182,13 @@ lmm.fit3Multi <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights 
     px <- ncol(ShXYZ[[1]]$ShX)
     K <- length(ShXYZ)
     pz <- K + 1
+    py <- ncol(ShXYZ[[1]]$ShY)
   }
 
   if (common.s2) {
+    fn <- function(parameter) {
+      return(-lmm.profile03(par = parameter, pooled = F, reml, Y, X, Z, id.site, weights, ShXYZ, corstr)$lp)
+    }
 
     if (is.null(mypar.init)) {
       if(corstr == 'independence'){
@@ -204,44 +197,40 @@ lmm.fit3Multi <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights 
         lower_bounds <- c(rep(1e-6, pz+1))
         upper_bounds <- c(rep(Inf, pz+1))
       }else if(corstr == 'exchangeable'){
-        mypar.init <- c(rep(1, pz+1), 0.1, 0.1) # one for RE one for error
+        mypar.init <- c(rep(1, pz+1), 0.1)
         if (verbose) cat('Default mypar.init (var comp + rho) = ', mypar.init, '\n')
-        lower_bounds <- c(rep(1e-6, pz+1), rep(-1+1e-6,2))
-        upper_bounds <- c(rep(Inf, pz+1), rep(1-1e-6,2))
+        lower_bounds <- c(rep(1e-6, pz+1), -1/(py-1)+1e-6)  # Ensure valid correlation
+        upper_bounds <- c(rep(Inf, pz+1), 1-1e-6)
       }
     }
 
-    fn <- function(parameter) {
-      return(-lmm.profile03Multi(par = parameter, pooled = FALSE,
-                                 reml, Y, X, Z, id.site, weights, ShXYZ, corstr, py = py)$lp)
+    res <- optim(mypar.init, fn, method = "L-BFGS-B",
+                 hessian = hessian,
+                 lower = lower_bounds, upper = upper_bounds)
+
+    if (verbose) {
+      cat(ifelse(res$convergence == 0, "Convergence Reached", "Non-convergence!"), '\n')
+      if(hessian) {
+        cat(ifelse(all(eigen(res$hessian)$values > 0), "Hessian PD", "Hessian not PD"), '\n')
+      }
+      cat("The number of function evaluations used is ", res$counts[1], '\n')
     }
 
-
-    res <- optim(mypar.init, fn, method = "L-BFGS-B",
-                 hessian = T,
-                 # control = list(maxit = 500),
-                 lower = lower_bounds, upper = upper_bounds
-                 # lower = rep(1e-6, length(mypar.init))
-    )
-
-    if (verbose) cat(ifelse(all(res$convergence == 0, eigen(res$hessian)$value > 0),
-                            "Convergence Reached", "Non-convergence!"), 'and',
-                     ifelse(all(eigen(res$hessian)$value > 0),
-                            "Hessian PD", "Hessian not PD"), '\n',
-                     "The number of function evaluations used is ", res$counts[1], '\n')
-
-
     mypar <- res$par
-    res.profile <- lmm.profile03Multi(par = mypar, pooled = FALSE,
-                                      reml, Y, X, Z, id.site, weights, ShXYZ, corstr, py = py)
+    res.profile <- lmm.profile03(par = mypar, pooled = FALSE, reml, Y, X, Z, id.site, weights, ShXYZ, corstr)
 
-    s2 <- mypar[pz+1]
-    V <- mypar[1:pz]
-    rho_v = ifelse(corstr == 'exchangeable', tail(mypar, 2), NA)
-    rho = ifelse(corstr == 'exchangeable', tail(mypar, 1), NA)
+    if(corstr == 'independence'){
+      s2 <- mypar[pz+1]
+      V <- mypar[1:pz]
+      rho <- NA
+    } else if(corstr == 'exchangeable'){
+      s2 <- mypar[pz+1]
+      V <- mypar[1:pz]
+      rho <- tail(mypar, 1)
+    }
   }
 
   return(list(b = res.profile$b, V = V, s2 = s2,
-              rho = rho, rho_v = rho_v, # rho_v and rho
+              rho = rho,
               res = res, res.profile = res.profile))
 }

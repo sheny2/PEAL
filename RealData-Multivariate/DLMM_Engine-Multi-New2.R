@@ -69,10 +69,12 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
 
     logdet_sum <- 0
     quad_form_sum <- matrix(0, py, py)
+    XtVX_sum <- matrix(0, px*py, px*py)  # For REML adjustment
     N <- 0
 
     for (h in 1:K) {
       sh <- names(ShXYZ)[h]
+      ShX <- ShXYZ[[sh]]$ShX
       ShZ <- ShXYZ[[sh]]$ShZ
       ShZY <- ShXYZ[[sh]]$ShZY
       ShY <- ShXYZ[[sh]]$ShY
@@ -93,13 +95,16 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
       quad_term <- ShY - t(ShZY) %*% W_h %*% ShZY
       quad_form_sum <- quad_form_sum + quad_term
 
+      XtVX_sum <- XtVX_sum + kronecker(Sigma_e_inv, ShX)
+
       N <- N + Nh
     }
 
     # Compute log-likelihood
     if (reml) {
       # REML version: includes additional term for fixed effects
-      loglik <- -0.5 * (logdet_sum + (N - px) * logdet_Sigma_e +
+      logdet_XtVX <- as.numeric(determinant(XtVX_sum, logarithm = TRUE)$modulus)
+      loglik <- -0.5 * (logdet_sum + (N - px) * logdet_Sigma_e + logdet_XtVX +
                           sum(diag(Sigma_e_inv %*% quad_form_sum)))
     } else {
       # ML version
@@ -116,8 +121,8 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
                upper = c(rep(Inf, K+1), Inf, 1-1e-6))
 
   # Extract parameters
-  sigma_u <- opt$par[1]
-  sigma_v <- opt$par[2:(K+1)]
+  # sigma_u <- opt$par[1]
+  # sigma_v <- opt$par[2:(K+1)]
   sigma <- opt$par[K+2]
   rho <- opt$par[K+3]
 
@@ -125,12 +130,30 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
   Sigma_e <- matrix(rho*sigma^2, py, py)
   diag(Sigma_e) <- sigma^2
 
-  cat("Number of function evaluations used to estimate D and Sigma:", opt$counts[1], '\n')
-  cat(sigma_u, '\n', sigma_v, '\n', sigma, rho, '\n')
+  cat("Number of function evaluations used to estimate Sigma:", opt$counts[1], '\n')
 
+
+  # Now estimate D
+  mypar.init <- c(rep(1, K+1), sigma)
+  fn <- function(parameter) {
+    return(-lmm.profile03(par = parameter, pooled = F, reml, Y, X, Z, id.site, weights, ShXYZ)$lp)
+  }
+
+  res <- optim(mypar.init, fn, method = "L-BFGS-B",
+               hessian = T,
+               lower = c(rep(1e-6, K+2)),
+               upper = c(rep(Inf, K+2)))
+
+  cat("Number of function evaluations used to estimate D:", res$counts[1], '\n')
+
+  sigma_u <- sqrt(res$par[1])
+  sigma_v <- sqrt(res$par[2:(K+1)])
+
+  cat(sigma_u, '\n', sigma_v, '\n', sigma, rho, '\n')
   list(sigma_u = sigma_u, sigma_v = sigma_v, sigma = sigma, rho = rho,
        Sigma_e = Sigma_e, opt = opt)
 }
+
 
 
 
@@ -233,9 +256,8 @@ estimate_fixed_effects <- function(Y, X, Z, id.site, D, Sigma_e, weights = NULL)
   chol_sum <- chol(sum_xt_sigmax)
   B <- backsolve(chol_sum, forwardsolve(t(chol_sum), sum_xt_sigmay))
 
-  B <- cbind(B[1:9,1],B[10:18,2],B[19:27,3])
-
-  # print(dim(B))
+  # B <- cbind(B[1:9,1],B[10:18,2],B[19:27,3])
+  B <- extract_shifted_matrix(B)
 
   # Compute standard errors using Cholesky
   B_se <- matrix(sqrt(diag(chol2inv(chol_sum))), px, py)
@@ -303,3 +325,129 @@ federated_lmm_multivariate <- function(Y, X, Z, id.site, weights = NULL,
        loglik = current_loglik)
 }
 
+
+
+extract_shifted_matrix <- function(mat) {
+  n <- nrow(mat)
+  p <- ncol(mat)
+  stopifnot(n %% p == 0)  # Ensure n is divisible by p
+
+  block_size <- n / p
+
+  result <- sapply(1:p, function(j) {
+    start <- (j - 1) * block_size + 1
+    end <- j * block_size
+    mat[start:end, j]
+  })
+
+  # If sapply simplifies to a matrix, it needs transposition
+  if (is.matrix(result)) {
+    return((result))
+  } else {
+    return(matrix(result, ncol = p))
+  }
+}
+
+
+
+#############
+lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
+                          Y, X, Z, id.site, weights = NULL,
+                          ShXYZ, corstr = "independence", rcpp = FALSE) {
+  if (pooled) {
+    id.site.uniq <- unique(id.site)
+    px <- ncol(X)
+    pz <- ncol(Z) / length(id.site.uniq)
+  } else {
+    id.site.uniq <- names(ShXYZ)
+    px <- ncol(ShXYZ[[1]]$ShX)
+    pz <- length(id.site.uniq) + 1
+    py = ncol(ShXYZ[[1]]$ShY)
+  }
+
+  lpterm1 <- lpterm2 <- remlterm <- 0
+  bterm1 <- matrix(0, px, px)   # bterm1 is still px x px
+  bterm2 <- matrix(0, px, py)   # bterm2 is now px x py
+  Wh <- list()
+  N <- 0
+
+  for (h in seq_along(id.site.uniq)) {
+    sh <- id.site.uniq[h]
+    ShX  <- ShXYZ[[sh]]$ShX
+    ShXZ <- ShXYZ[[sh]]$ShXZ
+    ShXY <- ShXYZ[[sh]]$ShXY
+    ShZ  <- ShXYZ[[sh]]$ShZ
+    ShZY <- ShXYZ[[sh]]$ShZY
+    ShY  <- ShXYZ[[sh]]$ShY
+    Nh   <- ShXYZ[[sh]]$Nh
+
+    N <- N + Nh
+    pzh <- ncol(ShZ)
+
+    if(corstr == 'independence'){
+      sigma_u2 = par[1]
+      sigma_vh2 = par[1 + h]
+      V <- diag(c(sigma_u2, rep(sigma_vh2, (pzh - 1))), pzh)
+      s2 = tail(par, 1)
+    }else if(corstr == 'exchangeable'){
+      sigma_u2 = par[1]
+      sigma_vh2 = par[1 + h]
+      s2 = tail(par, 2)[1]
+      rho = tail(par, 2)[2]
+      D <- diag(sqrt(sigma_vh2), pzh)
+      D[1,1] = sqrt(sigma_u2)
+      R <- matrix(rho, pzh, pzh)  # Correlation matrix
+      diag(R) <- 1
+      R_r = R
+      R_r[,1] = R_r[1,] = 0
+      R_r[1,1] = 1
+      V <- D %*% R_r %*% D
+    }
+
+    Vinv <- solve(V, diag(nrow(V)))  # Inverse of V
+    # log-determinant
+    A <- diag(col(V)) + ShZ %*% V / s2
+    logdet <- as.numeric(determinant(A, logarithm = TRUE)$modulus) + Nh * log(s2)
+    lpterm1 <- lpterm1 + logdet
+
+    Wh[[h]] = solve(s2 * Vinv + ShZ, diag(nrow(ShZ)))
+    # L_Wh <- chol(s2 * Vinv + ShZ)
+    # Wh[[h]] <- chol2inv(L_Wh)
+
+    bterm1 <- bterm1 + (ShX - ShXZ %*% Wh[[h]] %*% t(ShXZ)) / s2
+    bterm2 <- bterm2 + (ShXY - ShXZ %*% Wh[[h]] %*% ShZY) / s2     # bterm2 (px x py) now
+
+    # lpterm2: must take trace of (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY)
+    # that expression is py by py, so we do sum(diag(...)).
+    M <- (ShY - t(ShZY) %*% Wh[[h]] %*% ShZY) / s2
+    lpterm2 <- lpterm2 + sum(diag(M))
+  }
+
+  b <- solve(bterm1, bterm2)
+
+  # qterm is the final sum-of-squares piece:
+  #  lpterm2 - 2 * sum(bterm2 * b) + trace(t(b) %*% bterm1 %*% b).
+  # sum(bterm2 * b) does elementwise multiplication => scalar
+  # t(b) %*% bterm1 %*% b => (py x py), so we take sum(diag(...)).
+  tb_bterm1_b <- t(b) %*% bterm1 %*% b  # py by py
+  qterm <- lpterm2 - 2 * sum(bterm2 * b) + sum(diag(tb_bterm1_b))
+
+  if (reml) {
+    remlterm <- as.numeric(determinant(bterm1, logarithm = TRUE)$modulus)
+    lp <- -(lpterm1 * py + qterm + remlterm * py) / 2
+  } else {
+    cat("Use REML version for better prediction")
+  }
+
+  res <- list(
+    lp = lp,
+    b = b       # (px x py)
+    # s2 = s2,
+    # allterms = list(
+    #   lpterm1 = lpterm1, lpterm2 = lpterm2,
+    #   qterm   = qterm, remlterm= remlterm,
+    #   bterm1  = bterm1, bterm2  = bterm2
+    # )
+  )
+  return(res)
+}

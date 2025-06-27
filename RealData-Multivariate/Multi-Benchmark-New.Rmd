@@ -21,7 +21,7 @@ source("DLMM-Engine-Multi2.R")
 ```{r}
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(40:50, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(20:30, H, replace = TRUE)  # Number of patients per site
 px <- 9  # Number of covariates
 p_bin <- 5  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -36,8 +36,8 @@ sigma_u <- 3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 1.5  # Error variance
-rho <- 0.8 # Correlation between outcomes
+sigma_e <- 3  # Error variance
+rho <- 0.5 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -148,11 +148,10 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
 
 
 fit03.dlmm$b
-true_beta = beta
-
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
 
+true_beta = beta
 true_sigma = c(sigma_u, sigma_v_hosp)
 
 par(mfrow = c(1, py))  
@@ -190,9 +189,6 @@ plot(sqrt(diag(res$D)), true_sigma)
 points(sqrt(diag(res$D))[1], true_sigma[1], col = "red")
 abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
-
-
-
 
 
 ```{r, eval = F}
