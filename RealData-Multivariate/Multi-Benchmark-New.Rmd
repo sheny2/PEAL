@@ -12,22 +12,23 @@ library(MASS)
 library(data.table)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-set.seed(1917)
+# set.seed(1917)
 source("DLMM_Engine-Multi-New.R")
+source("DLMM-Engine-Multi2.R")
 ```
 
 
 ```{r}
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(30:40, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(40:50, H, replace = TRUE)  # Number of patients per site
 px <- 9  # Number of covariates
 p_bin <- 5  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 py <- 3 # Number of outcomes (multivariate)
 
 # Fixed effects
-beta0 <- rnorm(py, 0, 1)  # Intercept for each outcome
+# beta0 <- rnorm(py, 0, 1)  # Intercept for each outcome
 beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
@@ -35,8 +36,8 @@ sigma_u <- 3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 2  # Error variance
-rho <- 0.5 # Correlation between outcomes
+sigma_e <- 1.5  # Error variance
+rho <- 0.8 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -75,7 +76,7 @@ epsilon_hij <- mvrnorm(sum(n_visits), mu = rep(0, py),
 # Compute outcomes
 Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
 for (k in 1:py) {
-  Y_hij[, k] <- beta0[k] + X_hij %*% beta[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
+  Y_hij[, k] <- X_hij %*% beta[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
 }
 
 # Create data table
@@ -101,7 +102,6 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 # XYZ
 Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-X <- cbind(1, X)
 Z <- list()
 
 for(i in 1:H){
@@ -122,19 +122,19 @@ cor(Y)
 ```
 
 ```{r}
-true_beta = rbind(beta0, beta)
+true_beta = beta
 true_beta
 
-
+sigma_u
+sigma_v_hosp
 true_sigma = c(sigma_u, sigma_v_hosp)
-true_sigma
 
 sigma_e
-diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+rho
 ```
 
 
-```{r, eval = F}
+```{r, eval = T}
 source("DLMM-Engine-Multi2.R")
 ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
 
@@ -148,7 +148,7 @@ fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
 
 
 fit03.dlmm$b
-true_beta = rbind(beta0, beta)
+true_beta = beta
 
 sqrt(fit03.dlmm$V)
 sqrt(fit03.dlmm$s2)
@@ -158,7 +158,6 @@ true_sigma = c(sigma_u, sigma_v_hosp)
 par(mfrow = c(1, py))  
 for (i in 1:py) {
   plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
-  points(fit03.dlmm$b[,i][1], true_beta[,i][1], col = "red")
   abline(a = 0, b = 1, col = "blue", lwd = 1)
 }
 
@@ -169,26 +168,20 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 
-
-
-
-```{r, eval = F}
-res <- federated_lmm_multivariate(Y, X, Z, id.site)
-res
-```
-
 ```{r}
 source("DLMM_Engine-Multi-New2.R")
 res <- federated_lmm_multivariate(Y, X, Z, id.site)
 
 res$B
-sqrt(diag(res$D))
+res$cov_est$sigma_u
+res$cov_est$sigma_v
+res$cov_est$sigma
+res$cov_est$rho
 
 
 par(mfrow = c(1, py))  
 for (i in 1:py) {
   plot(res$B[,i], true_beta[,i], main = paste("Beta", i))
-  points(res$B[,i][1], true_beta[,i][1], col = "red")
   abline(a = 0, b = 1, col = "blue", lwd = 1)
 }
 
@@ -203,15 +196,9 @@ abline(a = 0, b = 1, col = "blue", lwd = 2)
 
 
 ```{r, eval = F}
-# Fit the model
-fit_multi <- lmm.fit3.multivariate(Y = Y, X = X, Z = Z, id.site = id.site, 
-                                  ShXYZ = ShXYZ_multi, reml = TRUE)
-
-# Results
-print(fit_multi$B)  # Fixed effects estimates
-print(fit_multi$Sigma_e)  # Residual covariance
-print(fit_multi$V)  # Random effects variances
+source("DLMM_Engine-Multi-New.R")
+# Run federated EM algorithm
+results <- federated_mv_lmm(ShXYZ_multi)
+print(results)
 ```
-
-
 

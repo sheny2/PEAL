@@ -39,14 +39,11 @@ lmm.get.summary3.multivariate <- function(Y = NULL, X = NULL, Z = NULL, id.site 
 estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = TRUE) {
   K <- length(ShXYZ)
   py <- ncol(ShXYZ[[1]]$ShY)
+  px <- ncol(ShXYZ[[1]]$ShX)
 
   # Initialize parameters: [sigma_u, sigma_v1, ..., sigma_vK, sigma, rho]
   if (is.null(par.init)) {
-    par.init <- c(rep(1, K+1), 1, 0.5)
-
-    # Initialize based on marginal variances
-    y_var <- mean(diag(ShXYZ[[1]]$ShY))/ShXYZ[[1]]$Nh
-    par.init <- c(rep(sqrt(y_var/3), K+1), sqrt(y_var/3), 0.1)
+    par.init <- c(rep(1, K+1), 1, 0.1)
   }
 
   cat("par.init are ", par.init, "\n")
@@ -58,39 +55,56 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
     sigma <- par[K+2]
     rho <- par[K+3]
 
+    # Validate parameters
+    if (sigma_u <= 0 || any(sigma_v <= 0) || sigma <= 0) return(Inf)
+    if (rho <= -1/(py-1) || rho >= 1) return(Inf)
+
     # Create exchangeable Sigma_e
     Sigma_e <- matrix(rho*sigma^2, py, py)
     diag(Sigma_e) <- sigma^2
+
+    # Pre-compute Sigma_e inverse and logdet
+    Sigma_e_inv <- solve(Sigma_e)
+    logdet_Sigma_e <- as.numeric(determinant(Sigma_e, logarithm = TRUE)$modulus)
 
     logdet_sum <- 0
     quad_form_sum <- matrix(0, py, py)
     N <- 0
 
     for (h in 1:K) {
-      ShZ <- ShXYZ[[h]]$ShZ
-      ShZY <- ShXYZ[[h]]$ShZY
-      ShY <- ShXYZ[[h]]$ShY
-      Nh <- ShXYZ[[h]]$Nh
+      sh <- names(ShXYZ)[h]
+      ShZ <- ShXYZ[[sh]]$ShZ
+      ShZY <- ShXYZ[[sh]]$ShZY
+      ShY <- ShXYZ[[sh]]$ShY
+      Nh <- ShXYZ[[sh]]$Nh
 
       pzh <- ncol(ShZ)
-      D <- diag(c(sigma_u^2, rep(sigma_v[h]^2, (pzh - 1))), pzh)
 
-      Vinv <- solve(D)
-      Wh <- solve(Vinv + ShZ)
+      # Construct exchangeable D_h matrix for this hospital
+      D_h <- diag(c(sigma_u^2, rep(sigma_v[h]^2, pzh-1)), pzh)
 
-      quad_form_sum <- quad_form_sum + (ShY - t(ShZY) %*% Wh %*% ShZY)
-      logdet_sum <- logdet_sum + as.numeric(determinant(diag(1, pzh) + ShZ %*% D, logarithm = TRUE)$modulus)
+      # Compute log|I + Z'Z D| using matrix determinant lemma
+      logdet_term <- as.numeric(determinant(diag(1, pzh) + ShZ %*% D_h, logarithm = TRUE)$modulus)
+      logdet_sum <- logdet_sum + logdet_term
+
+      # Compute quadratic form Y'(I - Z(D^{-1} + Z'Z)^{-1}Z')Y using Woodbury identity
+      D_h_inv <- solve(D_h)
+      W_h <- solve(D_h_inv + ShZ)
+      quad_term <- ShY - t(ShZY) %*% W_h %*% ShZY
+      quad_form_sum <- quad_form_sum + quad_term
+
       N <- N + Nh
     }
 
+    # Compute log-likelihood
     if (reml) {
-      Sigma_e <- quad_form_sum / (N - px)
-      loglik <- -0.5 * (logdet_sum + (N - px) * determinant(Sigma_e, logarithm = TRUE)$modulus +
-                          sum(diag(solve(Sigma_e, quad_form_sum))))
+      # REML version: includes additional term for fixed effects
+      loglik <- -0.5 * (logdet_sum + (N - px) * logdet_Sigma_e +
+                          sum(diag(Sigma_e_inv %*% quad_form_sum)))
     } else {
-      Sigma_e <- quad_form_sum / N
-      loglik <- -0.5 * (logdet_sum + N * determinant(Sigma_e, logarithm = TRUE)$modulus +
-                          sum(diag(solve(Sigma_e, quad_form_sum))))
+      # ML version
+      loglik <- -0.5 * (logdet_sum + N * logdet_Sigma_e +
+                          sum(diag(Sigma_e_inv %*% quad_form_sum)))
     }
 
     return(-loglik)
@@ -112,8 +126,7 @@ estimate_covariances <- function(ShXYZ, par.init = NULL, reml = TRUE, verbose = 
   diag(Sigma_e) <- sigma^2
 
   cat("Number of function evaluations used to estimate D and Sigma:", opt$counts[1], '\n')
-  cat(sigma_u, '\n', sigma_v, '\n')
-  print(Sigma_e)
+  cat(sigma_u, '\n', sigma_v, '\n', sigma, rho, '\n')
 
   list(sigma_u = sigma_u, sigma_v = sigma_v, sigma = sigma, rho = rho,
        Sigma_e = Sigma_e, opt = opt)
@@ -220,7 +233,7 @@ estimate_fixed_effects <- function(Y, X, Z, id.site, D, Sigma_e, weights = NULL)
   chol_sum <- chol(sum_xt_sigmax)
   B <- backsolve(chol_sum, forwardsolve(t(chol_sum), sum_xt_sigmay))
 
-  B <- cbind(B[1:10,1],B[11:20,2],B[21:30,3])
+  B <- cbind(B[1:9,1],B[10:18,2],B[19:27,3])
 
   # print(dim(B))
 
@@ -234,7 +247,7 @@ estimate_fixed_effects <- function(Y, X, Z, id.site, D, Sigma_e, weights = NULL)
 
 ## 4. Main Fitting Function ##
 federated_lmm_multivariate <- function(Y, X, Z, id.site, weights = NULL,
-                                       max_iter = 10, tol = 1e-8, verbose = TRUE) {
+                                       max_iter = 2, tol = 1e-8, verbose = TRUE) {
   # Initialize
   conv <- FALSE
   iter <- 0
@@ -289,13 +302,4 @@ federated_lmm_multivariate <- function(Y, X, Z, id.site, weights = NULL,
        iterations = iter,
        loglik = current_loglik)
 }
-
-
-
-
-
-
-
-
-
 
