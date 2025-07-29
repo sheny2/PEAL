@@ -23,7 +23,7 @@ source("DLMM_Engine_RI_P2.R")
 # different site different patients
 
 # Parameters
-H <- 5  # of sites
+H <- 3 # of sites
 m_hosp <- sample(250:300, H, replace = T) # of patients (1k to 3k later)
 
 
@@ -119,12 +119,12 @@ plot(density(three_lvl_dat$Y))
 ```{r}
 three_lvl_dat %>% 
   mutate(site = factor(site)) %>% 
-  ggplot(aes(visit_time, fill = site)) + geom_histogram() + facet_wrap(~site) + 
+  ggplot(aes(visit_time, fill = site)) + geom_histogram(bins = 50) + facet_wrap(~site) + 
   labs(x = "Visit Time") + theme(legend.position = "none")
 
 three_lvl_dat %>% 
   mutate(site = factor(site)) %>% 
-  ggplot(aes(visit_time, col = 5, fill = site, group = site)) + geom_histogram()  + 
+  ggplot(aes(visit_time, col = 5, fill = site, group = site)) + geom_histogram(bins = 50)  + 
   labs(x = "Visit Time") + theme(legend.position = "none")
    
 knots <- quantile(three_lvl_dat$visit_time, probs = c(0.25, 0.5, 0.75))

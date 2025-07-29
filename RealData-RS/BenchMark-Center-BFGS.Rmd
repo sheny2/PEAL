@@ -240,18 +240,47 @@ three_lvl_dat$site = factor(three_lvl_dat$site)
 three_lvl_dat$patient = factor(three_lvl_dat$patient)
 three_lvl_dat$visit = factor(three_lvl_dat$visit)
 
-model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + 
-              (1 | site) + (site + X1 + X2 + X3 + X4 + X5| site: patient), 
-              data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
-                                                        optCtrl  = list(method="L-BFGS-B")))
+# model <- lmer(Y ~ -1 + X1 + X2 + X3 + X4 + X5 + 
+#               (1 | site) + (site + X1 + X2 + X3 + X4 + X5| site: patient), 
+#               data = three_lvl_dat, control=lmerControl(optimizer = "optimx",
+#                                                         optCtrl  = list(method="L-BFGS-B")))
+
+lmer.RS <- lmer(
+  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + 
+       (1 | site) +                          
+       (0 + dummy(site, "1")| site:patient) +  (0 +  covar_composite_1 | site:patient) +  
+       (0 + dummy(site, "2")| site:patient)  + (0 +  covar_composite_2 | site:patient) +  
+       (0 + dummy(site, "3")| site:patient) +  (0 +  covar_composite_3 | site:patient) +  
+       (0 + dummy(site, "4")| site:patient)  + (0 +  covar_composite_4 | site:patient) +  
+       (0 + dummy(site, "5")| site:patient)  + (0 +  covar_composite_5 | site:patient),   
+  data = three_lvl_dat %>%
+    mutate(
+      covar_composite_1 = dummy(site, "1") * 
+        (X1 + X2 + X3 + X4 + X5),
+      covar_composite_2 = dummy(site, "2") * 
+        (X1 + X2 + X3 + X4 + X5),  
+      covar_composite_3 = dummy(site, "3") * 
+        (X1 + X2 + X3 + X4 + X5),
+      covar_composite_4 = dummy(site, "4") * 
+        (X1 + X2 + X3 + X4 + X5),  
+      covar_composite_5 = dummy(site, "5") * 
+        (X1 + X2 + X3 + X4 + X5)
+    ),
+  control = lmerControl(
+    optimizer = "optimx",
+    optCtrl = list(method = "L-BFGS-B")
+  )
+)
+
 
 # summary(model)
 
-fixed_effects <- fixef(model)
-fixed_effects
+fixed_effects <- fixef(lmer.RS)
+plot(fixed_effects, true_beta)
+abline(a = 0, b = 1, col = "blue", lwd = 2)
 
-vc <- VarCorr(model)
-vc
+plot(fit03.dlmm$b, true_beta)
+abline(a = 0, b = 1, col = "blue", lwd = 2)
 ```
 
 

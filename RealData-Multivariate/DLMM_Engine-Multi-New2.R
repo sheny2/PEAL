@@ -1,6 +1,8 @@
 library(Matrix)
 library(mvtnorm)
 
+# two stage approach, but complicated step (2 step for different sigmas)
+
 ## 1. Modified Summary Statistics Function for Multivariate Case ##
 lmm.get.summary3.multivariate <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = NULL) {
   if (is.null(weights)) weights <- rep(1, nrow(Y))
