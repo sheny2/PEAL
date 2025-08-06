@@ -1,0 +1,356 @@
+---
+title: "Benchmark"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(gridExtra)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(1999)
+source("DLMM_Engine_RS_BFGS2.R")
+```
+
+
+```{r}
+##############################
+# Parameters
+H <- 3  # Number of sites
+m_hosp <- sample(30, H, replace = T) # Number of patients per site
+
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+
+beta <- runif(px, 1, 10)
+
+sigma_e <- 2 # Error variance
+sigma_u <- 3 # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.1, max = 3)  # Varying patient-level intercept variance by hospital
+
+# Create a matrix of patient-level slope variances (H sites × px covariates)
+sigma_v_slope_hosp <- matrix(
+  runif(H * px, min = 0.1, max = 3), 
+  nrow = H, 
+  ncol = px
+)
+
+# Generate data
+nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)   # Hospital ID
+id.pat <- sequence(nn)                # Patient ID
+n_visits <- sample(1:10, sum(nn), replace = TRUE)  # Number of visits of patients
+
+# Expand hospital and patient IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Random effects
+u_h <- rnorm(H, mean = 0, sd = sigma_u)  # Hospital intercept effects
+v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))  # Patient intercept effects varying by hospital
+
+# Generate patient-level random slopes with different variances per covariate per site
+v_hi_slopes <- matrix(0, nrow = sum(nn), ncol = px)
+for (h in 1:H) {
+  # Get indices of patients in this hospital
+  pat_indices <- which(id.hosp == h)
+  
+  for (p in 1:px) {
+    # Generate slopes for this covariate at this hospital with specific variance
+    v_hi_slopes[pat_indices, p] <- rnorm(
+      length(pat_indices), 
+      mean = 0, 
+      sd = sigma_v_slope_hosp[h, p]
+    )
+  }
+}
+
+# Expansion of hospital effects
+u_h_patient <- rep(u_h, times = m_hosp)
+u_h_expanded <- rep(u_h_patient, times = n_visits)
+
+# Expansion of patient effects
+v_hi_expanded <- rep(v_hi, times = n_visits)
+
+# Expansion of random slopes for patient level
+v_hi_slopes_expanded <- v_hi_slopes[id.pat.expanded, ]
+
+# Covariates
+X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
+
+epsilon_hij <- rnorm(sum(n_visits), mean = 0, sd = sigma_e)
+
+# Compute outcome with random slopes
+y_hij <- beta0 + X_hij %*% beta + u_h_expanded + v_hi_expanded + rowSums(X_hij * v_hi_slopes_expanded) + epsilon_hij
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij,
+  Y = y_hij
+) %>% data.frame()
+
+# Assign column names for covariates
+setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), "Y"))
+```
+
+
+
+
+
+```{r}
+# Calculate the number of visits per patient per site
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data (as a preprocess probably)
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+
+# XYZ
+id.site <- rearranged_data$site
+H <- n_distinct(rearranged_data$site)
+Y <- rearranged_data$Y
+
+# Create formula for design matrix
+# Main effects of covariates + natural splines + interactions
+formula <- ~ X1 + X2 + X3 + X4 + X5 + X6 - 1
+X <- model.matrix(formula, data = rearranged_data)
+RScol <- ncol(X)
+
+
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+    filter(site == i) %>%
+    group_by(site, patient) %>%
+    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  df <- rearranged_data %>% filter(site == i) %>% dplyr::select(c(patient, colnames(X)))
+
+  # Extract unique patient IDs and their visit counts
+  patients <- unique(df$patient)
+  num_patients <- length(patients)
+
+  # Number of covariates (excluding patient and visit columns)
+  covariate_cols <- colnames(df)[2:(ncol(df))]  # Select only X columns
+  num_covariates <- length(covariate_cols)
+
+  # Create a list of block matrices for each patient
+  patient_matrices <- lapply(patients, function(pat) {
+    patient_data <- df %>% filter(patient == pat) %>% dplyr::select(all_of(covariate_cols))
+    as.matrix(patient_data)  # Convert to matrix
+  })
+
+  # Create block diagonal matrix
+  block_diag_matrix <- as.matrix(bdiag(patient_matrices))
+
+  # Z[[i]] <- generate_Zhv_matrix(count_mat)
+  Z[[i]] <- cbind(generate_Zhv_matrix(count_mat), block_diag_matrix)
+}
+
+m_h_all = (rearranged_data %>% group_by(site) %>% dplyr::summarise(n_distinct(patient)))[,2]
+
+ShXYZ <- lmm.get.summary3(Y, X, Z, id.site, m_h_all = m_h_all)
+```
+
+
+```{r}
+ShXYZ <- lapply(ShXYZ, function(sh) {
+  sh$ShZ <- as(sh$ShZ, "dgCMatrix")  # Sparse format
+  sh
+})
+
+fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      RScol = RScol,
+                      mypar.init = NULL)
+# saveRDS(fit03.dlmm, "resultRS.rds")
+```
+
+```{r}
+dlmm_beta <- c(fit03.dlmm$b)
+ci_data = cbind(dlmm_beta, se = fit03.dlmm$b.sd,
+      ci.lower = c(fit03.dlmm$lb), ci.upper = c(fit03.dlmm$ub)) %>% 
+  round(3) %>% as.data.frame() 
+ci_data$term = rownames(ci_data)
+
+ci_data %>% 
+  # ggplot(aes(x = dlmm_beta, y = reorder(term, dlmm_beta))) +
+  ggplot(aes(x = dlmm_beta, y = term, color = dlmm_beta > 0)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_errorbarh(aes(xmin = ci.lower, xmax = ci.upper), 
+                 height = 0.2, linewidth = 1) +
+  geom_point(aes(), 
+             shape = 21, fill = "white", stroke = 1.5) +
+  labs(title = "Coefficient Estimates with 95% CI (RS)",
+       x = "Effect Size (β) with 95% CI",
+       y = NULL,
+       size = "Effect\nMagnitude") +
+  # scale_x_continuous(breaks = seq(-0.2, 0.7, by = 0.1)) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    panel.grid.major.y = element_line(color = "gray90"),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "none"
+  ) +
+  scale_size_continuous(range = c(3, 6))  # Adjust point size range
+```
+
+
+```{r}
+build_lmer_model <- function(data, response, fixed_vars, 
+                           site_var = "site", patient_var = "patient",
+                           random_intercept = TRUE,
+                           random_slopes = NULL) {
+  
+  # Ensure factors are properly set
+  data <- data %>%
+    mutate(across(c({{site_var}}, {{patient_var}}), as.factor))
+  
+  # Construct fixed effects formula
+  fixed_formula <- paste0(response, " ~ -1 + (", 
+                         paste(fixed_vars, collapse = " + "), ")")
+  
+  # Initialize random effects parts
+  random_parts <- character(0)
+  
+  # Add site-level random intercept if requested
+  if (random_intercept) {
+    random_parts <- c(random_parts, paste0("(1 | ", site_var, ")"))
+  }
+  
+  # Add site-specific random effects if slopes are specified
+  if (!is.null(random_slopes)) {
+    sites <- unique(data[[site_var]])
+    
+    for (site in sites) {
+      # Create site dummy variable
+      dummy_var <- paste0("dummy_site", site)
+      data[[dummy_var]] <- as.numeric(data[[site_var]] == site)
+      
+      # Add patient intercept for this site
+      random_parts <- c(random_parts, 
+                       paste0("(0 + ", dummy_var, " || ", site_var, ":", patient_var, ")"))
+      
+      # Add random slopes for this site
+      for (slope in random_slopes) {
+        slope_var <- paste0("slope_", site, "_", slope)
+        data[[slope_var]] <- data[[dummy_var]] * data[[slope]]
+        random_parts <- c(random_parts,
+                         paste0("(0 + ", slope_var, " || ", site_var, ":", patient_var, ")"))
+      }
+    }
+  }
+  
+  # Combine all formula parts
+  full_formula <- paste(fixed_formula, paste(random_parts, collapse = " + "), sep = " + ")
+  
+  # Fit the model
+  lmer(
+    formula = as.formula(full_formula),
+    data = data,
+    control = lmerControl(
+      optimizer = "optimx",
+      optCtrl = list(method = "L-BFGS-B")
+    )
+  )
+}
+
+lmer.mod_RS <- build_lmer_model(
+  data = rearranged_data,
+  response = "Y",
+  fixed_vars = c("X1", "X2", "X3", "X4", "X5", "X6"),
+  site_var = "site",
+  patient_var = "patient",
+  random_intercept = TRUE,
+  random_slopes = c("X1", "X2", "X3", "X4", "X5", "X6")  # Specify which variables get random slopes
+)
+```
+
+
+```{r}
+lmer.mod_RS_summ <- summary(lmer.mod_RS)
+
+lmer_beta <- fixef(lmer.mod_RS)
+lmer_sigma <- c(rev(diag(sqrt(diag(lmer.mod_RS_summ$varcor)))),lmer.mod_RS_summ$sigma)
+lmer.mod_RS_summ$varcor
+
+# names
+lmer_sigma_names <- c("site_RI_sigma")
+for (h in 1:H) {
+  lmer_sigma_names <- c(
+    lmer_sigma_names,
+    paste0("pt_sigma_RI_bysite", h),
+    paste0("pt_sigma_RS", 1:RScol, "_bysite", h)
+  )
+}
+
+names(lmer_sigma) <- c(lmer_sigma_names, "residual_sigma")
+```
+
+
+```{r}
+plot(lmer_sigma,c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2)) )
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+
+plot(lmer_beta, fit03.dlmm$b)
+abline(a = 0, b = 1, col = "blue", lwd = 2)
+
+cbind(
+lmer_beta = lmer_beta,
+dlmm_beta = fit03.dlmm$b
+)
+
+cbind(
+lmer_sigma = c(lmer_sigma),
+dlmm_sigma = c(sqrt(fit03.dlmm$V), sqrt(fit03.dlmm$s2))
+)
+```
+
+
+
+
+```{r}
+
+sqrt(fit03.dlmm$V)[1]
+sigma_u 
+
+
+cbind(
+sqrt(fit03.dlmm$V)[-1],
+c(sigma_v_hosp[1], sigma_v_slope_hosp[1,],
+  sigma_v_hosp[2], sigma_v_slope_hosp[2,],
+  sigma_v_hosp[2], sigma_v_slope_hosp[3,])
+)
+
+sqrt(fit03.dlmm$s2)
+sigma_e
+```
+
+```{r}
+plot(sqrt(fit03.dlmm$V)[-1], 
+     c(sigma_v_hosp[1], sigma_v_slope_hosp[1,],
+  sigma_v_hosp[2], sigma_v_slope_hosp[2,],
+  sigma_v_hosp[2], sigma_v_slope_hosp[3,]))
+```
+
