@@ -1,9 +1,12 @@
-# DLMM-3
+### PEAL: Privacy-preserving Efficient Aggregation of Longitudinal Data
+This repository contains an R implementation of the PEAL (Privacy-preserving Efficient Aggregation of Longitudinal data) algorithm. PEAL is a novel, one-shot distributed algorithm designed to fit three-level linear mixed-effects models without sharing individual patient data (IPD).
 
-Distributed Linear mixed effects model with three level structure
+The key features of PEAL are:
 
-Developing a lossless, one-shot, privacy preservaing algorithm for hospital-paitent-visit data
+* Privacy-Preserving: Operates exclusively on site-level summary statistics, ensuring patient-level data remains local. 
 
+* Communication-Efficient: Requires only a single round of communication from participating sites. 
 
-<img width="570" alt="Screenshot 2025-04-16 at 12 01 13 AM" src="https://github.com/user-attachments/assets/f385b743-9ba3-4127-8e7e-d3a6757ed7a8" />
-<img width="570" alt="Screenshot 2025-04-16 at 12 01 30 AM" src="https://github.com/user-attachments/assets/28700b1c-48b8-46c2-aa45-62551cd1bcfd" />
+* Lossless: Achieves results that are statistically identical to a traditional pooled analysis where all IPD is centralized. 
+
+This tutorial will guide you through simulating a multi-site dataset and using the PEAL engine to fit a model, then comparing the results to a standard linear mixed model fit with `lme4`.
