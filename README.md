@@ -8,7 +8,8 @@ The key features of PEAL are:
 * Communication-Efficient: Requires only a single round of communication from participating sites. 
 
 * Lossless: Achieves results that are statistically identical to a traditional pooled analysis where all IPD is centralized.
-* 
+
+  
 <img width="568" height="215" alt="Screenshot 2025-08-07 at 10 59 42 AM" src="https://github.com/user-attachments/assets/1c3c5cba-04ca-477e-8ac9-309947b64505" />
 
 This tutorial will guide you through simulating a multi-site dataset and using the PEAL engine to fit a model, then comparing the results to a standard linear mixed model fit with `lme4`.
