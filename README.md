@@ -46,7 +46,7 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 ### Step 1.1: Generate Summary Statistics
 This is the core of PEAL's privacy-preserving approach. Each site generates summary statistics from its local data. No individual patient data is shared. Here, we simulate this process by looping through our combined dataset. The function 
 
-```ruby
+```r
 # Define outcome Y, fixed-effects matrix X, and number of sites H
 Y <- rearranged_data$Y
 px <- 6 # Number of covariates
@@ -72,7 +72,7 @@ ShXYZ <- peal.get.summary(Y, X, Z, id.site)
 ### Step 1.2: Fit the PEAL Model
 The central server uses only the aggregated summary statistics (ShXYZ) to fit the model. Notice that Y, X, and Z are set to NULL.
 
-```ruby
+```r
 # Fit the model using the RI engine
 fit.peal <- peal.fit.RI(
   Y = NULL, X = NULL, Z = NULL, id.site = NULL,
@@ -85,7 +85,7 @@ fit.peal <- peal.fit.RI(
 
 (optional) To prove the lossless property, we run a standard pooled analysis with lme4 and compare the results.
 
-```ruby
+```r
 # Fit a standard LMM for comparison
 fit.lmer <- lmer(
   Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 +
