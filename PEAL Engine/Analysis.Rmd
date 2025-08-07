@@ -1,0 +1,359 @@
+---
+title: "Analysis"
+output: 
+    pdf_document   
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = F, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(123)
+```
+
+```{r, eval = F, echo = F}
+##############################
+# Parameters
+H <- 3  # Number of sites
+m_hosp <- sample(50:100, H, replace = T) # Number of patients per site
+
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+
+beta <- 1:px  # Fixed effects for covariates
+
+sigma_e <- 0.5 # Error variance
+sigma_u <- 0.1 # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.8, max = 1)  # Varying patient-level variance by hospital
+sigma_v_slope_hosp <- runif(H, min = 0.2, max = 0.3)  # Varying patient-level variance for covariates
+
+# Generate data
+nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)   # Hospital ID
+id.pat <- sequence(nn)                # Patient ID
+n_visits <- sample(1:10, sum(nn), replace = TRUE)  # Number of visits of patients
+
+# Expand hospital and patient IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Random effects
+u_h <- rnorm(H, mean = 0, sd = sigma_u)  # Hospital effects
+v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))  # Patient effects varying by hospital
+
+# # Random slopes for each covariate at hospital level
+# u_h_slopes <- matrix(rnorm(H * px, mean = 0, sd = 1), nrow = H, ncol = px)
+
+# Random slopes for each covariate at patient level
+v_hi_slopes <- matrix(rnorm(sum(nn) * px, mean = 0, sd = rep(sigma_v_slope_hosp, times = m_hosp)), nrow = sum(nn), ncol = px)
+
+# Expansion of hospital effects
+u_h_patient <- rep(u_h, times = m_hosp)
+u_h_expanded <- rep(u_h_patient, times = n_visits)
+
+# Expansion of patient effects
+v_hi_expanded <- rep(v_hi, times = n_visits)
+
+# Expansion of random slopes for hospital and patient levels
+# u_h_slopes_expanded <- u_h_slopes[id.hosp.expanded, ]
+v_hi_slopes_expanded <- v_hi_slopes[id.pat.expanded, ]
+
+# Covariates
+X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
+
+epsilon_hij <- rnorm(sum(n_visits), mean = 0, sd = sigma_e)
+
+# Compute outcome with random slopes
+y_hij <- X_hij %*% beta + u_h_expanded + v_hi_expanded + rowSums(X_hij * v_hi_slopes_expanded) + epsilon_hij
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij,
+  Y = y_hij
+) %>% data.frame()
+
+# Assign column names for covariates
+setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), "Y"))
+
+saveRDS(three_lvl_dat, file = "three_lvl_dat.rds")
+```
+
+
+```{r}
+three_lvl_dat <- readRDS("three_lvl_dat.rds")
+head(three_lvl_dat)
+H <- n_distinct(three_lvl_dat$site)
+px <- 6
+
+```
+
+```{r}
+source("../PEAL Engine/PEAL_Engine_RI.R")
+```
+
+
+```{r}
+# Preprocessing
+# Calculate the number of visits per patient per site
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data (as a preprocess probably)
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+```
+
+
+# PEAL 
+```{r}
+# XYZ
+Y <- rearranged_data$Y
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+X <- cbind(X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+                    filter(site == i) %>%
+                    group_by(site, patient) %>%
+                    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data$site
+
+ShXYZ <- peal.get.summary(Y, X, Z, id.site)
+```
+
+```{r}
+fit.peal = peal.fit.RI(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+```
+
+# LMM
+```{r}
+fit.lmer <- lmer(
+  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 + 
+       (1 | site) +                          # Site-level random intercept
+       (0 + dummy(site, "1") |  site:patient) +   # Site1-specific patient RE
+       (0 + dummy(site, "2") |  site:patient) +   # Site2-specific patient RE
+       (0 + dummy(site, "3") |  site:patient),    # Site3-specific patient RE
+  data = rearranged_data,
+  control = lmerControl(
+    optimizer = "optimx",
+    optCtrl = list(method = "L-BFGS-B")
+  )
+)
+```
+
+
+# fixed effects
+```{r}
+peal_beta = c(fit.peal$b)
+lmm_beta = fixef(fit.lmer)
+cbind(lmm_beta, peal_beta)
+```
+
+# random effects
+```{r}
+summ.lmer <- summary(fit.lmer)
+lmm_sigma = c(site = sqrt(summ.lmer$varcor$site),
+                diag(sqrt(summ.lmer$varcor$site.patient.2)), 
+                diag(sqrt(summ.lmer$varcor$site.patient.1)), 
+                diag(sqrt(summ.lmer$varcor$site.patient)), 
+               residual = summ.lmer$sigma)
+
+peal_sigma = c(sqrt(fit.peal$V), sqrt(fit.peal$s2))
+cbind(lmm_sigma, peal_sigma)
+```
+
+
+
+# RS
+
+```{r}
+source("../PEAL Engine/PEAL_Engine_RS.R")
+```
+
+```{r}
+# Create formula for design matrix
+# fixed effects part
+formula <- ~ X1 + X2 + X3 + X4 + X5 + X6 -1 
+X <- model.matrix(formula, data = rearranged_data)
+
+# RS part
+formula_RS <- ~ X6 - 1
+X_RS <- model.matrix(formula_RS, data = rearranged_data)
+
+Z <- construct_Z_list(rearranged_data, colnames(X_RS))
+
+m_h_all = (rearranged_data %>% group_by(site) %>% dplyr::summarise(n_distinct(patient)))[,2]
+
+ShXYZ <- peal.get.summary(Y, X, Z, id.site, m_h_all = m_h_all)
+```
+
+
+```{r}
+fit.peal = peal.fit.RS(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+```
+
+```{r}
+fit.lmer <- lmer(
+  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 +
+       (1 | site) +                          
+       (0 + dummy(site, "1")|| site:patient) +  (0 +  covar_composite_1 || site:patient) +  
+       (0 + dummy(site, "2")|| site:patient)  + (0 +  covar_composite_2 || site:patient) +  
+       (0 + dummy(site, "3")|| site:patient)  + (0 +  covar_composite_3 || site:patient),   
+  data = rearranged_data %>%
+    mutate(
+      covar_composite_1 = dummy(site, "1") * X6,
+      covar_composite_2 = dummy(site, "2") * X6,
+      covar_composite_3 = dummy(site, "3") * X6
+    ),
+  control = lmerControl(
+    optimizer = "optimx",
+    optCtrl = list(method = "L-BFGS-B")
+  )
+)
+```
+
+```{r}
+lmer.mod_RS_summ <- summary(fit.lmer)
+lmer_beta <- fixef(fit.lmer)
+
+lmer_sigma = c(sqrt(lmer.mod_RS_summ$varcor$site),
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.5)), 
+                 diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.3)), 
+                 diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.1)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.4)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.2)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient)), 
+               lmer.mod_RS_summ$sigma)
+names(lmer_sigma) <- c("site_RI_sigma", paste0("pt_sigma_RI_bysite", 1:H),paste0("pt_sigma_RS_bysite", 1:H), "residual_sigma")
+
+```
+
+# fixed effects
+
+```{r}
+peal_beta = c(fit.peal$b)
+lmm_beta = fixef(fit.lmer)
+cbind(lmm_beta, peal_beta)
+```
+
+# random effects
+
+```{r}
+summ.lmer <- summary(fit.lmer)
+lmm_sigma = c(sqrt(lmer.mod_RS_summ$varcor$site),
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.5)), 
+                 diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.3)), 
+                 diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.1)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.4)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient.2)), 
+                diag(sqrt(lmer.mod_RS_summ$varcor$site.patient)), 
+               lmer.mod_RS_summ$sigma)
+H = 3
+names(lmm_sigma) <- c("site RI", paste0("pt RI by site", 1:H),paste0("pt RS by site", 1:H), "residual")
+
+peal_sigma = c(sqrt(fit.peal$V), sqrt(fit.peal$s2))
+cbind(lmm_sigma, peal_sigma)
+```
+
+
+
+```{r, fig.height=7, fig.width=10}
+library(ggplot2)
+library(tibble)
+library(patchwork)
+library(ggrepel)
+
+# Panel A: Beta
+df_beta <- tibble(
+  dlmm = as.numeric(peal_beta),
+  lmer = as.numeric(lmm_beta),
+  coef = names(lmm_beta)
+)
+
+p_beta <- ggplot(df_beta, aes(x = lmer, y = dlmm, label = coef)) +
+  geom_point(color = "#219ebc", size = 3) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#023047") +
+  geom_text_repel(size = 5, max.overlaps = Inf, box.padding = 2, fontface = "bold") +
+  labs(
+    x = "Pooled-Data Estimate", y = "PEAL Estimate",
+    title = "(1). Comparison of Fixed Effect Estimates"
+  ) +
+  theme_minimal(base_size = 13) + theme(plot.title = element_text(face = "bold"))
+
+# Panel B: Sigma
+# Create df_sigma with grouping for color
+df_sigma <- tibble(
+  dlmm = as.numeric(peal_sigma),
+  lmer = as.numeric(lmm_sigma),
+  component = names(lmm_sigma),
+  type = c(
+    "Site RI", rep("Pt RI", H),  rep("Pt RS", H), "Residual"
+  )
+)
+
+type_colors <- c(
+  "Site RI" = "#1f78b4",     # Blue
+  "Pt RI" = "#33a02c",       # Green
+  "Pt RS" = "#ff7f00",       # Orange
+  "Residual" = "#e31a1c"     # Red
+)
+
+
+# Sigma plot with color
+p_sigma <- ggplot(df_sigma, aes(x = lmer, y = dlmm, label = component, color = type)) +
+  geom_point(size = 3.5) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray30") +
+  geom_text_repel(size = 3.5, max.overlaps = Inf, box.padding = 1.2, fontface = "bold") +
+  labs(
+    x = "Pooled-Data Estimate", 
+    y = "PEAL Estimate",
+    title = "(2). Comparison of Random Effect SDs and Residual SD",
+    color = "Component Type"
+  ) +
+  scale_color_manual(values = type_colors) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold")
+  )
+
+# Combine with patchwork
+compare_plot <- p_beta / p_sigma +
+  plot_annotation(
+    title = ""
+  )
+
+compare_plot
+```
+
