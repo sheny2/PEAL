@@ -7,7 +7,9 @@ The key features of PEAL are:
 
 * Communication-Efficient: Requires only a single round of communication from participating sites. 
 
-* Lossless: Achieves results that are statistically identical to a traditional pooled analysis where all IPD is centralized. 
+* Lossless: Achieves results that are statistically identical to a traditional pooled analysis where all IPD is centralized.
+* 
+<img width="568" height="215" alt="Screenshot 2025-08-07 at 10 59 42 AM" src="https://github.com/user-attachments/assets/1c3c5cba-04ca-477e-8ac9-309947b64505" />
 
 This tutorial will guide you through simulating a multi-site dataset and using the PEAL engine to fit a model, then comparing the results to a standard linear mixed model fit with `lme4`.
 
@@ -36,9 +38,10 @@ head(three_lvl_dat)
 | 6 | 1 | 2 | 1 | 1 | 1 | 1 | 0.3219037 | -1.6069905 | -0.5368642 | -3.596303 |
 
 
+
 ### Data Preparation
 PEAL operates on hierarchical data. Our dataset, `three_lvl_dat`, contains records of patient visits nested within sites. 
-We first perform a simple preprocessing step to reorder the data, which can sometimes help with model fitting, though it's not strictly required by PEAL.
+We first perform a simple preprocessing step to reorder the data by visit counts at each site.
 
 ```r
 # Calculate the number of visits per patient to use for reordering
@@ -54,7 +57,8 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 
 
 ### Step 1.1: Generate Summary Statistics
-This is the core of PEAL's privacy-preserving approach. Each site generates summary statistics from its local data. No individual patient data is shared. Here, we simulate this process by looping through our combined dataset. The function 
+This is the core of PEAL's privacy-preserving approach. Each site generates summary statistics from its local data. No individual patient data is shared. 
+Here, we simulate this process by looping through our combined dataset. 
 
 ```r
 # Define outcome Y, fixed-effects matrix X, and number of sites H
@@ -110,8 +114,19 @@ fit.lmer <- lmer(
 # Compare Fixed Effects
 peal_beta <- c(fit.peal$b)
 lmm_beta <- fixef(fit.lmer)
-print(cbind(lmm_beta, peal_beta))
+cbind(lmm_beta, peal_beta)
+```
+| Fixed Effects | lmm beta | peal beta |
+|---|---|---|
+| X1 | 1.013306 | 1.013307 |
+| X2 | 2.093979 | 2.093980 |
+| X3 | 2.938045 | 2.938046 |
+| X4 | 4.008884 | 4.008884 |
+| X5 | 5.023196 | 5.023196 |
+| X6 | 6.007726 | 6.007727 |
 
+
+```r
 # Compare Random Effects (Standard Deviations)
 summ.lmer <- summary(fit.lmer)
 lmm_sigma <- c(
@@ -122,19 +137,9 @@ lmm_sigma <- c(
   residual = summ.lmer$sigma
 )
 peal_sigma <- c(sqrt(fit.peal$V), sqrt(fit.peal$s2))
-print(cbind(lmm_sigma, peal_sigma))
+cbind(lmm_sigma, peal_sigma)
 ```
-
-| Fixed Effects | lmm_beta | peal_beta |
-|---|---|---|
-| X1 | 1.013306 | 1.013307 |
-| X2 | 2.093979 | 2.093980 |
-| X3 | 2.938045 | 2.938046 |
-| X4 | 4.008884 | 4.008884 |
-| X5 | 5.023196 | 5.023196 |
-| X6 | 6.007726 | 6.007727 |
-
-| Random Effect | lmm_sigma | peal_sigma |
+| Random Effect | lmm sigma | peal sigma |
 |---|---|---|
 | site | 0.1094553 | 0.1094358 |
 | site1:patient | 0.9705814 | 0.9705763 |
@@ -208,7 +213,9 @@ fit.lmer.rs <- lmer(
 )
 ```
 
-| Fixed Effects | lmm_beta | peal_beta |
+Once again, the outputs for both fixed and random effects match perfectly.
+
+| Fixed Effects | lmm beta | peal beta |
 |---|---|---|
 | X1 | 1.025053 | 1.025055 |
 | X2 | 2.104015 | 2.104018 |
@@ -217,7 +224,7 @@ fit.lmer.rs <- lmer(
 | X5 | 5.029522 | 5.029522 |
 | X6 | 6.012435 | 6.012434 |
 
-| Random Effect | lmm_sigma | peal_sigma |
+| Random Effect | lmm sigma | peal sigma |
 |---|---|---|
 | site RI | 0.1112932 | 0.1113393 |
 | pt RI by site1 | 0.9590522 | 0.9590176 |
@@ -228,7 +235,6 @@ fit.lmer.rs <- lmer(
 | pt RS by site3 | 0.2733985 | 0.2733912 |
 | residual | 0.6379580 | 0.6379587 |
 
-Once again, the outputs for both fixed and random effects match perfectly.
 
 
 
