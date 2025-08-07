@@ -1,1 +1,0 @@
-{"project_name":["Sim"],"step":["initialize"],"sites":["1","2","3"],"heterogeneity":[true],"heterogeneity_effect":["random"],"model":["DLM"],"family":["gaussian"],"outcome":["outcome"],"variables":["X"],"optim_maxit":[100],"lead_site":["1"],"upload_date":["2025-06-20 13:39:10.413923"]}
