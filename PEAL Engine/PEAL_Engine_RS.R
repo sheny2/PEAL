@@ -218,7 +218,7 @@ peal.fit.RS <- function(Y = NULL, X = NULL, Z = NULL, id.site = NULL, weights = 
     K <- length(id.site.uniq)
     px <- ncol(X)
     pz <- ncol(Z) / K
-    ShXYZ <- lmm.get.summary3(Y, X, Z, weights = weights, id.site = id.site)
+    ShXYZ <- peal.get.summary(Y, X, Z, weights = weights, id.site = id.site)
   } else {
     id.site.uniq <- names(ShXYZ)
     px <- ncol(ShXYZ[[1]]$ShX)

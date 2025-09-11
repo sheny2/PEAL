@@ -13,14 +13,14 @@ library(MASS)
 library(data.table)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-set.seed(123)
+set.seed(1235)
 ```
 
-```{r, eval = F, echo = F}
+```{r, eval = T, echo = T}
 ##############################
 # Parameters
 H <- 3  # Number of sites
-m_hosp <- sample(50:100, H, replace = T) # Number of patients per site
+m_hosp <- sample(50:75, H, replace = T) # Number of patients per site
 
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
@@ -37,7 +37,7 @@ sigma_v_slope_hosp <- runif(H, min = 0.2, max = 0.3)  # Varying patient-level va
 nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
 id.hosp <- rep(1:H, times = m_hosp)   # Hospital ID
 id.pat <- sequence(nn)                # Patient ID
-n_visits <- sample(1:10, sum(nn), replace = TRUE)  # Number of visits of patients
+n_visits <- sample(10:15, sum(nn), replace = TRUE)  # Number of visits of patients
 
 # Expand hospital and patient IDs for visits
 id.visit <- sequence(n_visits)
@@ -92,11 +92,10 @@ saveRDS(three_lvl_dat, file = "three_lvl_dat.rds")
 
 
 ```{r}
-three_lvl_dat <- readRDS("three_lvl_dat.rds")
+# three_lvl_dat <- readRDS("three_lvl_dat.rds")
 head(three_lvl_dat)
 H <- n_distinct(three_lvl_dat$site)
 px <- 6
-
 ```
 
 ```{r}
@@ -221,6 +220,9 @@ fit.peal = peal.fit.RS(Y = NULL, X = NULL, Z = NULL,
                       ShXYZ = ShXYZ,  # only need summary stats
                       corstr = 'independence',
                       mypar.init = NULL)
+c(fit.peal$b)
+sqrt(fit.peal$V)
+sqrt(fit.peal$s2)
 ```
 
 ```{r}
@@ -241,7 +243,70 @@ fit.lmer <- lmer(
     optCtrl = list(method = "L-BFGS-B")
   )
 )
+
+fixef(fit.lmer)
+VarCorr(fit.lmer)
 ```
+
+## Correlated random effects at the patient level: RI and RS covariance correlated 
+
+```{r}
+source("../PEAL Engine/PEAL_Engine_CorrRS.R")
+fit.peal_Corr = peal.fit.CorrRS(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+c(fit.peal_Corr$b)
+sqrt(fit.peal_Corr$V)[1:(1+H+H)]
+sqrt(fit.peal_Corr$s2)
+fit.peal_Corr$rho
+```
+
+
+
+```{r, echo = F}
+fit3.lmer <- lmer(
+  Y ~ -1 + X1 + X2 + X3 + X4 + X5 + X6 +
+       (1 | site) +                          
+       (0 + dummy(site, "1") + dummy(site, "2") + dummy(site, "3") +
+          covar_composite_1 + covar_composite_2 + covar_composite_3 | site:patient),
+  data = rearranged_data %>%
+    mutate(
+      covar_composite_1 = dummy(site, "1") * X6,
+      covar_composite_2 = dummy(site, "2") * X6,
+      covar_composite_3 = dummy(site, "3") * X6
+    ),
+  control = lmerControl(
+    optimizer = "optimx",
+    optCtrl = list(method = "L-BFGS-B")
+  )
+)
+fixef(fit3.lmer)
+VarCorr(fit3.lmer)
+```
+
+
+## more correlation between site and patient level random effects 
+
+```{r}
+source("../PEAL Engine/PEAL_Engine_CorrRS2.R")
+fit.peal_Corr = peal.fit.CorrRS(Y = NULL, X = NULL, Z = NULL,
+                      id.site = NULL, weights = NULL,
+                      pooled = F, reml = T,
+                      common.s2 = T,
+                      ShXYZ = ShXYZ,  # only need summary stats
+                      corstr = 'independence',
+                      mypar.init = NULL)
+fit.peal_Corr$b
+
+sqrt(fit.peal_Corr$V)[1:(1+H+H)]
+sqrt(fit.peal_Corr$s2)
+fit.peal_Corr$rho
+```
+
 
 ```{r}
 lmer.mod_RS_summ <- summary(fit.lmer)
@@ -256,8 +321,8 @@ lmer_sigma = c(sqrt(lmer.mod_RS_summ$varcor$site),
                 diag(sqrt(lmer.mod_RS_summ$varcor$site.patient)), 
                lmer.mod_RS_summ$sigma)
 names(lmer_sigma) <- c("site_RI_sigma", paste0("pt_sigma_RI_bysite", 1:H),paste0("pt_sigma_RS_bysite", 1:H), "residual_sigma")
-
 ```
+
 
 # fixed effects
 
@@ -356,4 +421,6 @@ compare_plot <- p_beta / p_sigma +
 
 compare_plot
 ```
+
+
 

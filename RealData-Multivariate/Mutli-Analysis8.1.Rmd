@@ -10,34 +10,33 @@ library(tidyverse)
 library(lme4)
 library(MASS)  
 library(data.table)
+library(Matrix)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-# set.seed(7788)
-source("DLMM_Engine-Multi-New.R")
 source("DLMM-Engine-Multi2.R")
+# set.seed(2025)
 ```
 
 
 ```{r}
 # Parameters
-H <- 5  # Number of sites
-m_hosp <- sample(40:50, H, replace = TRUE)  # Number of patients per site
-px <- 9  # Number of covariates
-p_bin <- 5  # Number of binary covariates
+H <- 3  # Number of sites
+m_hosp <- sample(50:100, H, replace = TRUE)  # Number of patients per site
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 py <- 3 # Number of outcomes (multivariate)
 
 # Fixed effects
-# beta0 <- rnorm(py, 0, 1)  # Intercept for each outcome
 beta <- matrix(runif(px*py, 1, 10), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 3  # Site-level variance
-sigma_v_hosp <- runif(H, min = 1, max = 5)  # Varying sigma_v by hospital
+sigma_u <- 0.2  # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.5, max = 1)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 2.5  # Error variance
-rho <- 0.8 # Correlation between outcomes
+sigma_e <- 0.3  # Error variance
+rho <- 0.6 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -46,7 +45,7 @@ diag(rho_mat) <- 1  # Diagonal elements are 1
 nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
 id.hosp <- rep(1:H, times = m_hosp)  # Hospital ID
 id.pat <- sequence(nn)  # Patient ID
-n_visits <- sample(1:30, sum(nn), replace = TRUE)  # Number of visits per patient
+n_visits <- sample(1:20, sum(nn), replace = TRUE)  # Number of visits per patient
 
 # Expand hospital and patient IDs for visits
 id.visit <- sequence(n_visits)
@@ -114,85 +113,35 @@ for(i in 1:H){
 }
 
 id.site <- rearranged_data$site
-
-# ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
-ShXYZ_multi <- lmm.get.summary3.multivariate(Y, X, Z, id.site)
-
-cor(Y)
 ```
 
 ```{r}
-true_beta = beta
-true_beta
-
+# true
+beta
 sigma_u
 sigma_v_hosp
-true_sigma = c(sigma_u, sigma_v_hosp)
-
 sigma_e
 rho
 ```
 
-
-```{r, eval = T, fig.width=10, fig.height=4}
-source("DLMM-Engine-Multi2.R")
-ShXYZ <- lmm.get.summary3(Y, X, Z, id.site)
-
-fit03.dlmm = lmm.fit3(Y = NULL, X = NULL, Z = NULL,
-                      id.site = NULL, weights = NULL,
-                      pooled = F, reml = T,
-                      common.s2 = T,
-                      ShXYZ = ShXYZ,  # only need summary stats
-                      corstr = 'independence',
-                      mypar.init = NULL)
-
-
-fit03.dlmm$b
-sqrt(fit03.dlmm$V)
-sqrt(fit03.dlmm$s2)
-
-true_beta = beta
-true_sigma = c(sigma_u, sigma_v_hosp)
-
-par(mfrow = c(1, py))  
-for (i in 1:py) {
-  plot(fit03.dlmm$b[,i], true_beta[,i], main = paste("Beta", i))
-  abline(a = 0, b = 1, col = "blue", lwd = 1)
-}
-
-par(mfrow = c(1, 2))  
-plot(sqrt(fit03.dlmm$V), true_sigma)
-points(sqrt(fit03.dlmm$V)[1], true_sigma[1], col = "red")
-abline(a = 0, b = 1, col = "blue", lwd = 2)
-```
-
-
-```{r, fig.width=10, fig.height=4}
-# combined method?
-source("DLMM_Engine-Multi-New2.R")
-res <- federated_lmm_multivariate(Y, X, Z, id.site)
-
-res$B
-res$cov_est$sigma_u
-res$cov_est$sigma_v
-res$cov_est$sigma
-res$cov_est$rho
-
-
-par(mfrow = c(1, py))  
-for (i in 1:py) {
-  plot(res$B[,i], true_beta[,i], main = paste("Beta", i))
-  abline(a = 0, b = 1, col = "blue", lwd = 1)
-}
-
-par(mfrow = c(1, 2))  
-plot(sqrt(diag(res$D)), true_sigma)
-points(sqrt(diag(res$D))[1], true_sigma[1], col = "red")
-abline(a = 0, b = 1, col = "blue", lwd = 2)
-```
-
 ```{r}
-source("DLMM-Engine-Multi3.R")
+source("PEAL_Engine_Multi.R")
+
+res <- federated_lmm_two_stage(Y, X, Z, id.site)
+
+# estimate
+res$B
+res$sigma_u
+res$sigma_v
+res$sigma
+res$rho
+```
+
+
+```{r, eval = T}
+source("DLMM_Engine-Multi-New2.R")
+
+ShXYZ_multi <- lmm.get.summary3.multivariate(Y, X, Z, id.site)
 res <- federated_lmm_multivariate(Y, X, Z, id.site)
 
 res$B
@@ -201,25 +150,9 @@ res$cov_est$sigma_v
 res$cov_est$sigma
 res$cov_est$rho
 
-
-par(mfrow = c(1, py))  
-for (i in 1:py) {
-  plot(res$B[,i], true_beta[,i], main = paste("Beta", i))
-  abline(a = 0, b = 1, col = "blue", lwd = 1)
-}
-
-par(mfrow = c(1, 1))  
-plot(sqrt(diag(res$D)), true_sigma)
-points(sqrt(diag(res$D))[1], true_sigma[1], col = "red")
-abline(a = 0, b = 1, col = "blue", lwd = 2)
+beta
+sigma_u
+sigma_v_hosp
+sigma_e
+rho
 ```
-
-
-
-```{r, eval = F}
-source("DLMM_Engine-Multi-New.R")
-# Run federated EM algorithm
-results <- federated_mv_lmm(ShXYZ_multi)
-print(results)
-```
-

@@ -1,0 +1,173 @@
+---
+title: "Multi-Analysis"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(Matrix)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(123)
+```
+
+
+```{r}
+# Parameters
+H <- 5  # Number of sites
+m_hosp <- sample(10:30, H, replace = TRUE)  # Number of patients per site
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+py <- 3 # Number of outcomes (multivariate)
+
+# Fixed effects
+beta <- matrix(runif(px*py, 5, 10), nrow = px, ncol = py)  # Fixed effects for covariates
+
+# Variance components
+sigma_u <- 0.2  # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
+
+# Exchangeable correlation structure
+sigma_e <- 0.3  # Error variance
+rho <- 0.5 # Correlation between outcomes
+rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
+diag(rho_mat) <- 1  # Diagonal elements are 1
+
+
+# Generate data
+nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)  # Hospital ID
+id.pat <- sequence(nn)  # Patient ID
+n_visits <- sample(1:20, sum(nn), replace = TRUE)  # Number of visits per patient
+
+# Expand hospital and patient IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Random effects
+u_h <- rnorm(H, mean = 0, sd = sigma_u)  # Hospital effects
+v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))  # Patient effects varying by hospital
+
+# Expansion of hospital effects
+u_h_patient <- rep(u_h, times = m_hosp)
+u_h_expanded <- rep(u_h_patient, times = n_visits)
+
+# Expansion of patient effects
+v_hi_expanded <- rep(v_hi, times = n_visits)
+
+# Covariates
+X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
+
+# Generate multivariate errors with exchangeable correlation
+epsilon_hij <- mvrnorm(sum(n_visits), mu = rep(0, py), 
+                       Sigma = diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py))
+
+# Compute outcomes
+Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
+for (k in 1:py) {
+  Y_hij[, k] <- X_hij %*% beta[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
+}
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij, Y_hij
+) %>% data.frame()
+
+setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), paste0("Y", 1:py)))
+
+# Preprocessing
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+```
+
+# PEAL 
+
+```{r}
+source("../PEAL Engine/PEAL_Engine_Multi.R")
+# XYZ
+Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+X <- cbind(X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+                    filter(site == i) %>%
+                    group_by(site, patient) %>%
+                    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data$site
+```
+
+
+```{r}
+fit_mv <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "exchangeable",        # or "independence"
+  estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
+  verbose = TRUE
+)
+
+fit_mv_ind <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "independence",       
+  estimate_rho = FALSE,
+  verbose = TRUE
+)
+```
+
+```{r}
+c(beta)
+fit_mv$b
+fit_mv_ind$b
+```
+
+```{r}
+# Correlation
+rho
+fit_mv$rho
+fit_mv_ind$rho
+```
+
+```{r}
+# Residual
+sigma_e^2
+fit_mv$s2
+fit_mv_ind$s2
+```
+
+```{r}
+# RE
+c(sigma_u, sigma_v_hosp)
+sqrt(fit_mv$theta * fit_mv$s2)
+sqrt(fit_mv_ind$theta * fit_mv_ind$s2)
+```
+
+
+
+
+
+

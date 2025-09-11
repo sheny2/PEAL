@@ -301,6 +301,8 @@ federated_lmm_multivariate <- function(Y, X, Z, id.site, weights = NULL,
     # Step 3: Estimate fixed effects
     fe_est <- estimate_fixed_effects(Y, X, Z, id.site, D, Sigma_e, weights)
     B <- fe_est$B
+    # fe_est <- lmm.profile03(par = c(cov_est$sigma_u, cov_est$sigma_v), pooled = FALSE, reml = T, Y = NULL, X = NULL, Z = NULL, id.site, weights = NULL, ShXYZ, corstr = 'independence')
+    # B <- fe_est$b
 
     # Check convergence
     current_loglik <- -cov_est$opt$value
@@ -444,12 +446,11 @@ lmm.profile03 <- function(par, pooled = FALSE, reml = TRUE,
   res <- list(
     lp = lp,
     b = b       # (px x py)
-    # s2 = s2,
-    # allterms = list(
-    #   lpterm1 = lpterm1, lpterm2 = lpterm2,
-    #   qterm   = qterm, remlterm= remlterm,
-    #   bterm1  = bterm1, bterm2  = bterm2
-    # )
   )
   return(res)
 }
+
+
+
+
+
