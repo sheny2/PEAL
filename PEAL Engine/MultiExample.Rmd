@@ -35,7 +35,7 @@ sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 sigma_e <- 0.3  # Error variance
-rho <- 0.5 # Correlation between outcomes
+rho <- 0.86 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -100,6 +100,15 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 
 # PEAL 
 
+$$
+\begin{aligned} 
+\tilde X_h^\top \tilde X_h &= (R_\rho^{-1/2}\otimes X_h)^\top\,(R_\rho^{-1/2}\otimes X_h) \\ 
+&= (R_\rho^{-1/2})^\top R_\rho^{-1/2}\ \otimes\ X_h^\top X_h \\ 
+&= R_\rho^{-1}\ \otimes\ S_{h,XX}. 
+\end{aligned}
+$$
+
+
 ```{r}
 source("../PEAL Engine/PEAL_Engine_Multi.R")
 # XYZ
@@ -121,15 +130,13 @@ id.site <- rearranged_data$site
 ```
 
 
-```{r}
-fit_mv <- peal.fit.RI_mv(
-  Y = Y, X = X, Z = Z, id.site = id.site,
-  weights = NULL, reml = TRUE,
-  corstr = "exchangeable",        # or "independence"
-  estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
-  verbose = TRUE
-)
+```{r, eval = F}
+peal.get.summary_mv(as.matrix(Y[,1]), X, Z, id.site = id.site, weights = NULL)[[1]]
+peal.get.summary_mv(Y, X, Z, id.site = id.site, weights = NULL)[[1]]
+```
 
+
+```{r}
 fit_mv_ind <- peal.fit.RI_mv(
   Y = Y, X = X, Z = Z, id.site = id.site,
   weights = NULL, reml = TRUE,
@@ -137,37 +144,73 @@ fit_mv_ind <- peal.fit.RI_mv(
   estimate_rho = FALSE,
   verbose = TRUE
 )
+
+
+fit_mv <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "exchangeable",        # or "independence"
+  estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
+  verbose = TRUE
+)
 ```
 
 ```{r}
 c(beta)
-fit_mv$b
 fit_mv_ind$b
+fit_mv$b
+
+fit_mv_ind$b.sd
+fit_mv$b.sd
 ```
 
 ```{r}
 # Correlation
 rho
-fit_mv$rho
 fit_mv_ind$rho
+fit_mv$rho
 ```
 
 ```{r}
 # Residual
 sigma_e^2
-fit_mv$s2
 fit_mv_ind$s2
+fit_mv$s2
 ```
+
+
+```{r}
+diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+fit_mv$Sigma_e
+```
+
 
 ```{r}
 # RE
 c(sigma_u, sigma_v_hosp)
-sqrt(fit_mv$theta * fit_mv$s2)
 sqrt(fit_mv_ind$theta * fit_mv_ind$s2)
+sqrt(fit_mv$theta * fit_mv$s2)
 ```
 
 
+```{r}
+bench::mark(
+  peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = T,
+  corstr = "independence",       
+  estimate_rho = F,
+  verbose = T)
+  )
+bench::mark(
+  peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = T,
+  corstr = "exchangeable",       
+  estimate_rho = T,
+  verbose = T)
+  )
 
-
+```
 
 

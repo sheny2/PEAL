@@ -244,7 +244,7 @@ peal.fit.RI_mv <- function(Y, X, Z, id.site, weights = NULL,
                            corstr = c('exchangeable','independence'),
                            mypar.init = NULL,
                            estimate_rho = TRUE, rho_init = 0.1,
-                           hessian = FALSE, verbose = TRUE) {
+                           hessian = TRUE, verbose = TRUE) {
 
   corstr <- match.arg(corstr)
   if (!is.matrix(Y)) stop("For multivariate fit, supply Y as N x R matrix.")
@@ -299,16 +299,16 @@ peal.fit.RI_mv <- function(Y, X, Z, id.site, weights = NULL,
   if (corstr == "exchangeable") {
     rc <- .Rcorr_inv_and_logdet(R, rho = 0)  # just to get bounds
     lower[length(lower)] <- rc$lower
-    upper[length(upper)] <- rc$upper - 1e-6
+    upper[length(upper)] <- rc$upper - 1e-8
   }
 
   res <- optim(mypar.init, fn, method = "L-BFGS-B",
                hessian = hessian, lower = lower, upper = upper)
 
-  if (verbose) {
-    ok <- (res$convergence == 0)
-    cat(ifelse(ok, "Convergence reached", "Non-convergence!"), "\n")
-  }
+  if (verbose) cat(ifelse(all(res$convergence == 0), "Convergence Reached", "Non-convergence!"),
+                   "and",
+                   ifelse(all(eigen(res$hessian)$value > 0), "Hessian PD", "Hessian not PD"), "\n",
+                   "The number of function evaluations used is ", res$counts[1], '\n')
 
   # recompute profile at optimum
   if (corstr == "independence") {
