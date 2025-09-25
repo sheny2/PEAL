@@ -1,0 +1,249 @@
+---
+title: "Multi-Analysis"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(Matrix)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(123)
+```
+
+This is MLMM with one variable which has RS  
+
+```{r}
+# -----------------------
+# Parameters 
+H <- 5  # Number of sites
+m_hosp <- sample(15:30, H, replace = TRUE)  # Number of patients per site
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+py <- 3 # Number of outcomes (multivariate)
+
+# Fixed effects
+beta <- matrix(runif(px*py, 1, 5), nrow = px, ncol = py)
+
+# Variance components
+sigma_u <- 0.2  # Site-level RI sd
+sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Patient RI sd by hospital
+
+# --- NEW: patient-level random slope (per hospital), correlated with patient RI
+rs_idx <- p_bin + 1                # which X column gets a random slope
+sigma_rs_hosp <- runif(H, 0.25, 0.5)  # Patient RS sd by hospital
+corr_ri_rs <- 0                  # Corr between patient RI and RS (same within each hospital)
+
+# Exchangeable correlation structure for residuals
+sigma_e <- 0.3
+rho <- 0.5
+rho_mat <- matrix(rho, nrow = py, ncol = py); diag(rho_mat) <- 1
+
+# -----------------------
+# Generate IDs
+nn <- rep(m_hosp, times = 1)                 # patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)          # length = sum(nn); hospital per patient
+id.pat <- sequence(nn)                        # patient index within hospital
+n_visits <- sample(1:20, sum(nn), replace = TRUE)  # visits per patient
+
+# Expand to visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded  <- rep(id.pat,  times = n_visits)
+
+# -----------------------
+# Random effects
+# Site-level RI
+u_h <- rnorm(H, mean = 0, sd = sigma_u)
+
+# Patient-level (RI, RS) ~ N(0, Sigma_h) with hospital-specific sds and fixed corr
+# Sigma_h = [[sigma_v_h^2, rho*sigma_v_h*sigma_rs_h],
+#            [rho*sigma_v_h*sigma_rs_h, sigma_rs_h^2]]
+b_mat <- matrix(NA_real_, nrow = sum(nn), ncol = 2)
+for (p in seq_len(sum(nn))) {
+  h <- id.hosp[p]
+  S <- matrix(c(
+    sigma_v_hosp[h]^2,                     
+    corr_ri_rs*sigma_v_hosp[h]*sigma_rs_hosp[h],
+    corr_ri_rs*sigma_v_hosp[h]*sigma_rs_hosp[h], sigma_rs_hosp[h]^2
+  ), nrow = 2, byrow = TRUE)
+  b_mat[p, ] <- mvrnorm(1, mu = c(0, 0), Sigma = S)
+}
+b0_hi <- b_mat[, 1]  # patient RI
+b1_hi <- b_mat[, 2]  # patient RS
+
+# Expand site RI to visits (via patients)
+u_h_patient  <- rep(u_h, times = m_hosp)             # length = sum(nn), aligned with patients
+u_h_expanded <- rep(u_h_patient, times = n_visits)   # length = total rows
+
+# Expand patient RI/RS to visits
+b0_hi_expanded <- rep(b0_hi, times = n_visits)
+b1_hi_expanded <- rep(b1_hi, times = n_visits)
+
+# -----------------------
+# Covariates
+X_bin  <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3),
+                 nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1),
+                 nrow = sum(n_visits), ncol = p_cont)
+X_hij  <- cbind(X_bin, X_cont)
+
+# -----------------------
+# Multivariate errors (exchangeable across outcomes)
+epsilon_hij <- mvrnorm(
+  n = sum(n_visits),
+  mu = rep(0, py),
+  Sigma = diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+)
+
+# -----------------------
+# Outcomes with site RI, patient RI, and patient RS on X[, rs_idx]
+Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
+x_rs  <- X_hij[, rs_idx]  # covariate with random slope
+
+for (k in 1:py) {
+  # fixed + site RI + patient RI + patient RS * covariate + error
+  Y_hij[, k] <- X_hij %*% beta[, k] + u_h_expanded + b0_hi_expanded +
+                b1_hi_expanded * x_rs + epsilon_hij[, k]
+}
+
+# -----------------------
+# Data table
+three_lvl_dat <- data.table(
+  site    = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit   = id.visit,
+  X_hij, Y_hij
+) |> data.frame()
+
+setnames(
+  three_lvl_dat,
+  c("site", "patient", "visit", paste0("X", 1:px), paste0("Y", 1:py))
+)
+
+# (Optional) keep the random effects for diagnostics
+# three_lvl_dat$b0_hi <- rep(b0_hi, times = n_visits)
+# three_lvl_dat$b1_hi <- rep(b1_hi, times = n_visits)
+# three_lvl_dat$u_h   <- u_h_expanded
+
+# -----------------------
+# Preprocessing and reordering
+visit_count <- three_lvl_dat |>
+  dplyr::group_by(site, patient) |>
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) |>
+  arrange(site, total_visits, patient) |>
+  mutate(site = factor(site))
+```
+
+
+# PEAL 
+
+$$
+\begin{aligned} 
+\tilde X_h^\top \tilde X_h &= (R_\rho^{-1/2}\otimes X_h)^\top\,(R_\rho^{-1/2}\otimes X_h) \\ 
+&= (R_\rho^{-1/2})^\top R_\rho^{-1/2}\ \otimes\ X_h^\top X_h \\ 
+&= R_\rho^{-1}\ \otimes\ S_{h,XX}. 
+\end{aligned}
+$$
+
+
+```{r}
+source("../PEAL-Multivariate/PEAL_Engine_Multi-RS.R")
+# XYZ
+Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+X <- cbind(X)
+x_rs_name <- paste0("X", rs_idx)
+
+Z <- construct_Z_list(rearranged_data, x_rs_name)
+
+
+id.site <- rearranged_data$site
+```
+
+
+
+```{r}
+fit_mv_ind <- peal.fit.RS_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "independence",       
+  estimate_rho = FALSE,
+  verbose = TRUE
+)
+
+
+fit_mv <- peal.fit.RS_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "exchangeable",        # or "independence"
+  estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
+  verbose = TRUE
+)
+```
+
+```{r}
+c(beta)
+fit_mv_ind$b
+fit_mv$b
+
+fit_mv_ind$b.sd
+fit_mv$b.sd
+```
+
+```{r}
+# Correlation
+rho
+fit_mv_ind$rho
+fit_mv$rho
+```
+
+```{r}
+# Residual
+sigma_e^2
+fit_mv_ind$s2
+fit_mv$s2
+```
+
+```{r}
+diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+fit_mv$Sigma_e
+```
+
+
+```{r}
+# RE
+c(sigma_u, sigma_v_hosp, sigma_rs_hosp)
+sqrt(fit_mv_ind$theta * fit_mv_ind$s2)
+sqrt(fit_mv$theta * fit_mv$s2)
+```
+
+
+```{r, eval = F}
+bench::mark(
+  peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = T,
+  corstr = "independence",       
+  estimate_rho = F,
+  verbose = T)
+  )
+bench::mark(
+  peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = T,
+  corstr = "exchangeable",       
+  estimate_rho = T,
+  verbose = T)
+  )
+```
+
+
