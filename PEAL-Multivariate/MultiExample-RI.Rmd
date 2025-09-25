@@ -30,12 +30,12 @@ py <- 3 # Number of outcomes (multivariate)
 beta <- matrix(runif(px*py, 5, 10), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 0.2  # Site-level variance
+sigma_u <- 0.3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 0.3  # Error variance
-rho <- 0.86 # Correlation between outcomes
+sigma_e <- 0.5  # Error variance
+rho <- 0.5 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -210,7 +210,6 @@ bench::mark(
   estimate_rho = T,
   verbose = T)
   )
-
 ```
 
 

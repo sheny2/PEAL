@@ -41,7 +41,7 @@ sigma_rs_hosp <- runif(H, 0.25, 0.5)  # Patient RS sd by hospital
 corr_ri_rs <- 0                  # Corr between patient RI and RS (same within each hospital)
 
 # Exchangeable correlation structure for residuals
-sigma_e <- 0.3
+sigma_e <- 0.5
 rho <- 0.5
 rho_mat <- matrix(rho, nrow = py, ncol = py); diag(rho_mat) <- 1
 

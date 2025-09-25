@@ -11,7 +11,7 @@ library(Matrix)
 library(minqa)
 
 # -------------------------
-# elpers for Z_hv
+# helpers for Z_hv
 # -------------------------
 generate_record_count <- function(data) {
   counts <- table(data[, "n_hi"])
