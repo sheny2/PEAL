@@ -3,7 +3,7 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
-source("PEAL Engine/PEAL_Engine_Multi.R")
+source("PEAL_Engine_Multi.R")
 
 # Define number of cores for parallel execution
 num_cores <- detectCores() - 1
@@ -45,7 +45,7 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e", "rho"
 # Run simulations in parallel
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr", "MASS")) %dopar% {
 
-  source("PEAL Engine/PEAL_Engine_Multi.R")
+  source("PEAL_Engine_Multi.R")
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -190,7 +190,7 @@ beta_df %>% mutate(Bias = Estimate - True_Value) %>%
 
 
 sigma_df %>% mutate(Bias = Estimate - True_Value) %>%
-  # filter(Parameter == "sigma_e") %>%
+  filter(Parameter != "rho") %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
