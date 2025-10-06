@@ -3,33 +3,35 @@ library(foreach)
 library(data.table)
 library(dplyr)
 
-source("PEAL_Engine_Multi.R")
+source("PEAL_Engine_Multi-RI.R")
 
 # Define number of cores for parallel execution
 num_cores <- detectCores() - 1
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
-N = 100
+N = 200
 
 
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(30:50, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(10:30, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 py <- 3 # Number of outcomes (multivariate)
 
 # Fixed effects
-beta <- matrix(runif(px*py, 5, 10), nrow = px, ncol = py)  # Fixed effects for covariates
+# beta <- matrix(runif((px*py), -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
+beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 0.2  # Site-level variance
-sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
+sigma_u <- 0.3  # Site-level variance
+# sigma_v_hosp <- runif(H, min = 2, max = 3)  # Varying sigma_v by hospital
+sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29)
 
 # Exchangeable correlation structure
-sigma_e <- 0.3  # Error variance
+sigma_e <- 0.4  # Error variance
 rho <- 0.5 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
@@ -45,7 +47,8 @@ rownames(result_sigma) <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e", "rho"
 # Run simulations in parallel
 results <- foreach(k = 1:N, .packages = c("data.table", "dplyr", "MASS")) %dopar% {
 
-  source("PEAL_Engine_Multi.R")
+  source("PEAL_Engine_Multi-RI.R")
+  set.seed(k)
 
   # Generate data
   nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
@@ -127,7 +130,7 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr", "MASS")) %dopar
         Y = Y, X = X, Z = Z, id.site = id.site,
         pooled = FALSE,
         weights = NULL, reml = TRUE,
-        corstr = "exchangeable",        # or "independence"
+        corstr = "exchangeable",        # "exchangeable" "independence"
         estimate_rho = TRUE, rho_init = 0.1,
         verbose = FALSE
       )
@@ -143,6 +146,18 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr", "MASS")) %dopar
   )
 
 
+  if (!is.null(fit_mv))
+  {
+    if(all(eigen(fit_mv$opt$hessian)$value < 0))
+    {
+      return(NULL)
+    }
+  }
+
+  if (is.null(fit_mv)) {
+    return(NULL)  # This iteration will be omitted from results
+  }
+
   # Return the estimated parameters
   list(beta_res = fit_mv$b,
        sigma_res = c(sqrt(fit_mv$theta * fit_mv$s2),
@@ -151,8 +166,10 @@ results <- foreach(k = 1:N, .packages = c("data.table", "dplyr", "MASS")) %dopar
        )
 }
 
+results <- results[!sapply(results, is.null)]
+
 # Store results into matrices
-for (k in 1:N) {
+for (k in 1:length(results)) {
   result_beta[, k] <- results[[k]]$beta_res
   result_sigma[, k] <- results[[k]]$sigma_res
 }
@@ -190,10 +207,31 @@ beta_df %>% mutate(Bias = Estimate - True_Value) %>%
 
 
 sigma_df %>% mutate(Bias = Estimate - True_Value) %>%
-  filter(Parameter != "rho") %>%
+  # filter(Parameter != "rho") %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1) +
   geom_boxplot(fill = "lightblue", alpha = 0.6) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
+
+# metrics
+beta_df %>%
+  group_by(Parameter) %>%
+  summarise(
+    True_Value = first(True_Value),
+    Mean_Est   = mean(Estimate, na.rm = TRUE),
+    Bias       = Mean_Est - True_Value,
+    Variance   = var(Estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+sigma_df %>%
+  group_by(Parameter) %>%
+  summarise(
+    True_Value = first(True_Value),
+    Mean_Est   = mean(Estimate, na.rm = TRUE),
+    Bias       = Mean_Est - True_Value,
+    Variance   = var(Estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
 

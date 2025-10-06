@@ -20,22 +20,22 @@ set.seed(123)
 ```{r}
 # Parameters
 H <- 5  # Number of sites
-m_hosp <- sample(10:30, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(30:50, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
 py <- 3 # Number of outcomes (multivariate)
 
 # Fixed effects
-beta <- matrix(runif(px*py, 5, 10), nrow = px, ncol = py)  # Fixed effects for covariates
+beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
 sigma_u <- 0.3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 0.5  # Error variance
-rho <- 0.5 # Correlation between outcomes
+sigma_e <- 0.4  # Error variance
+rho <- 0.8 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -98,6 +98,7 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
   mutate(site = factor(site))
 ```
 
+
 # PEAL 
 
 $$
@@ -110,7 +111,7 @@ $$
 
 
 ```{r}
-source("../PEAL-Multivariate/PEAL_Engine_Multi.R")
+source("../PEAL-Multivariate/PEAL_Engine_Multi-RI.R")
 # XYZ
 Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
@@ -156,40 +157,46 @@ fit_mv <- peal.fit.RI_mv(
 ```
 
 ```{r}
-c(beta)
+c(beta) # true
 fit_mv_ind$b
 fit_mv$b
 
-fit_mv_ind$b.sd
-fit_mv$b.sd
+# fit_mv_ind$b.sd
+# fit_mv$b.sd
 ```
 
 ```{r}
 # Correlation
-rho
-fit_mv_ind$rho
-fit_mv$rho
+cat("true: ", rho, "\n")
+
+cat("Indp: ", fit_mv_ind$rho, "\n")
+ 
+cat("Exch: ", fit_mv$rho, "\n")
 ```
 
 ```{r}
 # Residual
-sigma_e^2
-fit_mv_ind$s2
-fit_mv$s2
+cat("true: ", sigma_e, "\n")
+
+cat("Indp: ", sqrt(fit_mv_ind$s2), "\n")
+ 
+cat("Exch: ", sqrt(fit_mv$s2), "\n")
 ```
 
 
 ```{r}
-diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py)
+diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py) # true
 fit_mv$Sigma_e
 ```
 
 
 ```{r}
 # RE
-c(sigma_u, sigma_v_hosp)
-sqrt(fit_mv_ind$theta * fit_mv_ind$s2)
-sqrt(fit_mv$theta * fit_mv$s2)
+cat("true: ", c(sigma_u, sigma_v_hosp), "\n")
+
+cat("Indp: ", sqrt(fit_mv_ind$theta * fit_mv_ind$s2), "\n")
+ 
+cat("Exch: ", sqrt(fit_mv$theta * fit_mv$s2), "\n")
 ```
 
 
