@@ -20,7 +20,7 @@ set.seed(123)
 ```{r}
 # Parameters
 H <- 3  # Number of sites
-m_hosp <- sample(10:20, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(10:30, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -35,7 +35,7 @@ sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 sigma_e <- 0.4  # Error variance
-rho <- 0.8 # Correlation between outcomes
+rho <- 0.5 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -161,19 +161,8 @@ c(beta) # true
 fit_mv_ind$b
 fit_mv$b
 
-c(colMeans(post$beta[,,1]),
-colMeans(post$beta[,,2]),
-colMeans(post$beta[,,3]))
-
 # fit_mv_ind$b.sd
 # fit_mv$b.sd
-
-cbind(c(beta), # true
-fit_mv_ind$b,
-fit_mv$b,
-c(colMeans(post$beta[,,1]),
-colMeans(post$beta[,,2]),
-colMeans(post$beta[,,3])))
 ```
 
 ```{r}
@@ -233,7 +222,6 @@ bench::mark(
 
 
 ```{r}
-library(dplyr)
 library(rstan)
 
 dat <- rearranged_data %>%
@@ -263,14 +251,15 @@ stan_data <- list(
 )
 ```
 
+
 ```{r}
-options(mc.cores = 8)
+options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
 fit_cs <- stan(
   file = "mv_lmm_cs.stan",
   data = stan_data,
-  chains = 2, iter = 2000, seed = 123
+  chains = 4, iter = 1000, seed = 123
 )
 
 print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e", "rho"),
@@ -280,7 +269,7 @@ print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e", "rho"),
 post <- rstan::extract(fit_cs)
 
 # Fixed effects (p x R):
-beta_mean <- apply(post$beta, c(1,2), mean)
+beta_mean <- as.vector(apply(post$beta, R, colMeans))
 
 # Variance components:
 sigma_u_hat   <- mean(post$sigma_u)
@@ -298,14 +287,22 @@ list(
 ```
 
 
+
+```{r, eval=F}
+library(shinystan)
+launch_shinystan(fit_cs)
+```
+
+
+
 ```{r}
-options(mc.cores = 8)
+options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
 fit_cs <- stan(
   file = "mv_lmm_cs_indep.stan",
   data = stan_data,
-  chains = 2, iter = 2000, seed = 123
+  chains = 4, iter = 1000, seed = 123
 )
 
 print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e"),
@@ -315,7 +312,7 @@ print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e"),
 post <- rstan::extract(fit_cs)
 
 # Fixed effects (p x R):
-beta_mean <- apply(post$beta, c(1,2), mean)
+beta_mean <- as.vector(apply(post$beta, R, colMeans))
 
 # Variance components:
 sigma_u_hat   <- mean(post$sigma_u)

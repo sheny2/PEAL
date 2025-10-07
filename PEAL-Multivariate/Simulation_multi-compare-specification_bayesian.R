@@ -11,7 +11,7 @@ source("PEAL_Engine_Multi-RI.R")
 # -------------------------
 # Parallel setup
 # -------------------------
-N <- 3
+N <- 2
 num_cores <- detectCores() - 1
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
@@ -37,7 +37,7 @@ sigma_v_hosp <- c(0.61, 0.63, 0.65, 0.67, 0.69)
 # sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
 
 # Residual SD and exchangeable correlation
-sigma_e <- 3
+sigma_e <- 0.5
 rho <- 0.5
 rho_mat <- matrix(rho, nrow = py, ncol = py); diag(rho_mat) <- 1
 
@@ -67,7 +67,7 @@ result_beta_exch_bayeisan  <- matrix(NA_real_, nrow = length(par_names_beta),  n
 result_sigma_exch_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
                             dimnames = list(par_names_sigma, paste0("sim", 1:N)))
 
-result_beta_indep_bayeisan  <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
+result_beta_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
                              dimnames = list(par_names_beta, paste0("sim", 1:N)))
 result_sigma_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
                              dimnames = list(par_names_sigma, paste0("sim", 1:N)))
@@ -208,7 +208,6 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   
   
   
-  
   # Baeysian
   dat <- rearranged_data %>%
     mutate(site = as.integer(factor(site)),
@@ -217,11 +216,8 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   N   <- nrow(dat)
   H   <- length(unique(dat$site))
   P   <- length(unique(dat$pat))
-  R   <- 3L
-  pX  <- 6L
+  R   <- py
   
-  y   <- as.matrix(dat[, paste0("Y", 1:R)])      # N x R
-  X   <- as.matrix(dat[, paste0("X", 1:pX)])     # N x pX
   site_id <- dat$site                            # length N, in {1,...,H}
   pat_id  <- dat$pat                             # length N, in {1,...,P}
   
@@ -232,8 +228,8 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
     pull(site)
   
   stan_data <- list(
-    N = N, H = H, P = P, R = R, p = pX,
-    y = y, X = X, site_id = site_id, pat_id = pat_id, pat_site = pat_site
+    N = N, H = H, P = P, R = R, p = px,
+    y = Y, X = X, site_id = site_id, pat_id = pat_id, pat_site = pat_site
   )
   
   
@@ -242,54 +238,51 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   fit_cs <- stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 2, iter = 2000, seed = 123
+    chains = 2, iter = 1000, seed = 123
   )
-  
-  print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e", "rho"),
-        probs = c(.025, .5, .975))
   
   # Extract draws and produce tidy summaries:
   post <- rstan::extract(fit_cs)
   
-  # Fixed effects (p x R):
-  beta_mean <- apply(post$beta, c(1,2), mean)
-  
-  # Variance components:
-  sigma_u_hat   <- mean(post$sigma_u)
-  sigma_vh_hat  <- apply(post$sigma_v_h, 2, mean)   # length H
-  sigma_e_hat   <- mean(post$sigma_e)
-  rho_hat       <- mean(post$rho)
-  
-  list(
-    beta_mean = beta_mean,
-    sd_site = sigma_u_hat,
-    sd_patient_by_site = sigma_vh_hat,
-    sd_residual = sigma_e_hat,
-    rho = rho_hat
+  out_exch_bayes <- list(
+    beta_mean = as.vector(apply(post$beta, R, colMeans)),
+    sigma_u_hat = mean(post$sigma_u),
+    sigma_vh_hat = apply(post$sigma_v_h, 2, mean),
+    sigma_e_hat = mean(post$sigma_e),
+    rho_hat = mean(post$rho)
   )
   
   
+  
+  # bayesian indep
+  fit_cs <- stan(
+    file = "mv_lmm_cs_indep.stan",
+    data = stan_data,
+    chains = 2, iter = 1000, seed = 123
+  )
+  
+  # Extract draws and produce tidy summaries:
   post <- rstan::extract(fit_cs)
   
-  bayes_beta = c(
-  colMeans(post$beta[,,1]),
-  colMeans(post$beta[,,2]),
-  colMeans(post$beta[,,3])
+  out_indep_bayes <- list(
+    beta_mean = as.vector(apply(post$beta, R, colMeans)),
+    sigma_u_hat = mean(post$sigma_u),
+    sigma_vh_hat = apply(post$sigma_v_h, 2, mean),
+    sigma_e_hat = mean(post$sigma_e),
+    rho_hat = 0
   )
-  
-  sigma_u_hat   <- mean(post$sigma_u)
-  sigma_vh_hat  <- apply(post$sigma_v_h, 2, mean)   # length H
-  sigma_e_hat   <- mean(post$sigma_e)
-  rho_hat       <- mean(post$rho)
-  
-  
+
   
   list(beta_exch  = out_exch$beta,
        sigma_exch = out_exch$sigma,
        beta_indep  = out_indep$beta,
        sigma_indep = out_indep$sigma,
-       beta_exch_bayes = bayes_beta,
-       sigma_exch_bayes = c(sigma_u_hat, sigma_vh_hat, sigma_e_hat, rho_hat)
+       beta_exch_bayes = out_exch_bayes$beta_mean,
+       sigma_exch_bayes = c(out_exch_bayes$sigma_u_hat, out_exch_bayes$sigma_vh_hat, 
+                            out_exch_bayes$sigma_e_hat, out_exch_bayes$rho_hat),
+       beta_indep_bayes = out_indep_bayes$beta_mean,
+       sigma_indep_bayes = c(out_indep_bayes$sigma_u_hat, out_indep_bayes$sigma_vh_hat, 
+                            out_indep_bayes$sigma_e_hat, out_indep_bayes$rho_hat)
        )
 }
 
@@ -303,6 +296,8 @@ for (k in seq_along(results)) {
   result_sigma_indep[, k] <- results[[k]]$sigma_indep
   result_beta_exch_bayeisan[,  k] <- results[[k]]$beta_exch_bayes
   result_sigma_exch_bayeisan[, k] <- results[[k]]$sigma_exch_bayes
+  result_beta_indep_bayeisan[,  k] <- results[[k]]$beta_indep_bayes
+  result_sigma_indep_bayeisan[, k] <- results[[k]]$sigma_indep_bayes
 }
 
 stopCluster(cl)
@@ -321,14 +316,18 @@ mk_long <- function(mat, par_names, model_label) {
 beta_exch_df  <- mk_long(result_beta_exch,  par_names_beta,  "Exchangeable")
 beta_indep_df <- mk_long(result_beta_indep, par_names_beta,  "Independence")
 beta_exch_bayes_df <- mk_long(result_beta_exch_bayeisan, par_names_beta,  "Exchangeable-B")
-beta_df <- rbind(beta_exch_df, beta_indep_df, beta_exch_bayes_df)
-beta_df$True_Value <- rep(true_beta, times = ncol(result_beta_exch) + ncol(result_beta_indep) + ncol(result_beta_exch_bayeisan))
+beta_indep_bayes_df <- mk_long(result_beta_indep_bayeisan, par_names_beta,  "Independence-B")
+beta_df <- rbind(beta_exch_df, beta_indep_df, beta_exch_bayes_df, beta_indep_bayes_df)
+beta_df$True_Value <- rep(true_beta, times = ncol(result_beta_exch) + ncol(result_beta_indep) + 
+                            ncol(result_beta_exch_bayeisan) + ncol(result_beta_indep_bayeisan))
 
 sigma_exch_df  <- mk_long(result_sigma_exch,  par_names_sigma, "Exchangeable")
 sigma_indep_df <- mk_long(result_sigma_indep, par_names_sigma, "Independence")
 sigma_exch_bayes_df  <- mk_long(result_sigma_exch_bayeisan,  par_names_sigma, "Exchangeable-B")
-sigma_df <- rbind(sigma_exch_df, sigma_indep_df, sigma_exch_bayes_df)
-sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma_exch) + ncol(result_sigma_indep) + ncol(result_sigma_exch_bayeisan))
+sigma_indep_bayes_df  <- mk_long(result_sigma_indep_bayeisan,  par_names_sigma, "Independence-B")
+sigma_df <- rbind(sigma_exch_df, sigma_indep_df, sigma_exch_bayes_df, sigma_indep_bayes_df)
+sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma_exch) + ncol(result_sigma_indep) + 
+                             ncol(result_sigma_exch_bayeisan) + ncol(result_sigma_indep_bayeisan))
 
 # -------------------------
 # Bias / Variance / MSE summaries (by Model)
