@@ -30,7 +30,7 @@ N <- 10
 # -------------------------
 # DGP Parameters
 # -------------------------
-H <- 3
+H <- 5
 m_hosp <- sample(10:30, H, replace = TRUE)
 px <- 6
 p_bin <- 3
@@ -42,7 +42,7 @@ beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
 
 # Variance components (SDs)
 sigma_u <- 0.3
-sigma_v_hosp <- c(0.61, 0.65, 0.69)
+sigma_v_hosp <- seq(0.5, 0.7, length.out = H)
 
 # sigma_u <- 0.3 * 10
 # sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
@@ -94,7 +94,7 @@ results <- vector("list", N)
 
 for (k in seq_len(N)) {
   source("PEAL_Engine_Multi-RI.R")
-  set.seed(k)
+  set.seed(sample(1:1e7, 1))
   
   # ---- IDs and visits
   nn <- rep(m_hosp, times = 1)
@@ -250,7 +250,7 @@ for (k in seq_len(N)) {
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 8, iter = 500
+    chains = 4, iter = 1000
   )
   
   post <- rstan::extract(fit_cs)
@@ -270,7 +270,7 @@ for (k in seq_len(N)) {
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 8, iter = 500
+    chains = 4, iter = 1000
   )
   
   post <- rstan::extract(fit_cs)
@@ -301,6 +301,8 @@ for (k in seq_len(N)) {
 
 results <- results[!sapply(results, is.null)]
 
+saveRDS(results, file = "results.rds")
+
 # -------------------------
 # Store into pre-allocated matrices
 # -------------------------
@@ -314,7 +316,6 @@ for (k in seq_along(results)) {
   result_beta_indep_bayeisan[,  k] <- results[[k]]$beta_indep_bayes
   result_sigma_indep_bayeisan[, k] <- results[[k]]$sigma_indep_bayes
 }
-
 
 # -------------------------
 # Long-format data with Model labels

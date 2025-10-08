@@ -1,0 +1,194 @@
+---
+title: "Multi-Analysis with Bayesian"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(Matrix)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+results <- readRDS("results100.rds")
+N = 100
+```
+
+```{r}
+H <- 3
+m_hosp <- sample(10:30, H, replace = TRUE)
+px <- 6
+p_bin <- 3
+p_cont <- px - p_bin
+py <- 3
+
+# Fixed effects
+beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
+
+# Variance components (SDs)
+sigma_u <- 0.3
+sigma_v_hosp <- c(0.61, 0.65, 0.69)
+
+# sigma_u <- 0.3 * 10
+# sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
+
+# Residual SD and exchangeable correlation
+sigma_e <- 0.5
+rho <- 0.5
+rho_mat <- matrix(rho, nrow = py, ncol = py); diag(rho_mat) <- 1
+
+# True values
+true_beta  <- c(beta)
+true_sigma <- c(sigma_u, sigma_v_hosp, sigma_e, rho)
+
+# -------------------------
+# Pre-allocate result matrices (keep N columns; fill NA on failure)
+# -------------------------
+par_names_beta  <- paste0("Beta", 1:(px*py))
+par_names_sigma <- c("sigma_u", paste0("sigma_v_", 1:H), "sigma_e", "rho")
+
+result_beta_exch  <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
+                            dimnames = list(par_names_beta, paste0("sim", 1:N)))
+result_sigma_exch <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
+                            dimnames = list(par_names_sigma, paste0("sim", 1:N)))
+
+result_beta_indep  <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
+                             dimnames = list(par_names_beta, paste0("sim", 1:N)))
+result_sigma_indep <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
+                             dimnames = list(par_names_sigma, paste0("sim", 1:N)))
+
+
+result_beta_exch_bayeisan  <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
+                            dimnames = list(par_names_beta, paste0("sim", 1:N)))
+result_sigma_exch_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
+                            dimnames = list(par_names_sigma, paste0("sim", 1:N)))
+
+result_beta_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_beta),  ncol = N,
+                             dimnames = list(par_names_beta, paste0("sim", 1:N)))
+result_sigma_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), ncol = N,
+                             dimnames = list(par_names_sigma, paste0("sim", 1:N)))
+# -------------------------
+# Store into pre-allocated matrices
+# -------------------------
+for (k in seq_along(results)) {
+  result_beta_exch[,  k] <- results[[k]]$beta_exch
+  result_sigma_exch[, k] <- results[[k]]$sigma_exch
+  result_beta_indep[,  k] <- results[[k]]$beta_indep
+  result_sigma_indep[, k] <- results[[k]]$sigma_indep
+  result_beta_exch_bayeisan[,  k] <- results[[k]]$beta_exch_bayes
+  result_sigma_exch_bayeisan[, k] <- results[[k]]$sigma_exch_bayes
+  result_beta_indep_bayeisan[,  k] <- results[[k]]$beta_indep_bayes
+  result_sigma_indep_bayeisan[, k] <- results[[k]]$sigma_indep_bayes
+}
+
+# -------------------------
+# Long-format data with Model labels
+# -------------------------
+mk_long <- function(mat, par_names, model_label) {
+  df <- reshape2::melt(as.data.frame(mat), value.name = "Estimate")
+  colnames(df) <- c("Simulation","Estimate")
+  df$Parameter <- rep(par_names, ncol(mat))
+  df$Model <- model_label
+  df
+}
+
+beta_exch_df  <- mk_long(result_beta_exch,  par_names_beta,  "Exchangeable")
+beta_indep_df <- mk_long(result_beta_indep, par_names_beta,  "Independence")
+beta_exch_bayes_df <- mk_long(result_beta_exch_bayeisan, par_names_beta,  "Exchangeable-B")
+beta_indep_bayes_df <- mk_long(result_beta_indep_bayeisan, par_names_beta,  "Independence-B")
+beta_df <- rbind(beta_exch_df, beta_indep_df, beta_exch_bayes_df, beta_indep_bayes_df)
+beta_df$True_Value <- rep(true_beta, times = ncol(result_beta_exch) + ncol(result_beta_indep) + 
+                            ncol(result_beta_exch_bayeisan) + ncol(result_beta_indep_bayeisan))
+
+sigma_exch_df  <- mk_long(result_sigma_exch,  par_names_sigma, "Exchangeable")
+sigma_indep_df <- mk_long(result_sigma_indep, par_names_sigma, "Independence")
+sigma_exch_bayes_df  <- mk_long(result_sigma_exch_bayeisan,  par_names_sigma, "Exchangeable-B")
+sigma_indep_bayes_df  <- mk_long(result_sigma_indep_bayeisan,  par_names_sigma, "Independence-B")
+sigma_df <- rbind(sigma_exch_df, sigma_indep_df, sigma_exch_bayes_df, sigma_indep_bayes_df)
+sigma_df$True_Value <- rep(true_sigma, times = ncol(result_sigma_exch) + ncol(result_sigma_indep) + 
+                             ncol(result_sigma_exch_bayeisan) + ncol(result_sigma_indep_bayeisan))
+
+# -------------------------
+# Bias / Variance / MSE summaries (by Model)
+# -------------------------
+beta_summary <- beta_df %>%
+  group_by(Model, Parameter) %>%
+  summarise(
+    True_Value = first(True_Value),
+    Mean_Est   = mean(Estimate, na.rm = TRUE),
+    Bias       = Mean_Est - True_Value,
+    Variance   = var(Estimate, na.rm = TRUE),
+    MSE        = Bias^2 + Variance,
+    .groups = "drop"
+  ) %>% arrange(Parameter, Model)
+
+sigma_summary <- sigma_df %>%
+  group_by(Model, Parameter) %>%
+  summarise(
+    True_Value = first(True_Value),
+    Mean_Est   = mean(Estimate, na.rm = TRUE),
+    Bias       = Mean_Est - True_Value,
+    Variance   = var(Estimate, na.rm = TRUE),
+    MSE        = Bias^2 + Variance,
+    .groups = "drop"
+  ) %>% arrange(Parameter, Model)
+```
+
+```{r, fig.height=6}
+# -------------------------
+# Plots: bias comparisons faceted by model
+# -------------------------
+beta_df %>%
+  mutate(Bias = Estimate - True_Value) %>%
+  ggplot(aes(x = Parameter, y = Bias)) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0) +
+  geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
+  facet_wrap(~ Model, ncol = 1, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Fixed Effects Bias: Exchangeable vs Independence")
+
+sigma_df %>%
+  mutate(Bias = Estimate - True_Value) %>%
+  ggplot(aes(x = Parameter, y = Bias)) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0) +
+  geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
+  facet_wrap(~ Model, ncol = 1, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ggtitle("Variance Components Bias: Exchangeable vs Independence")
+```
+
+```{r}
+# Inspect numeric summaries in console
+beta_summary %>% print(n=100)
+sigma_summary %>% print(n=100)
+
+ggplot(beta_summary, aes(x = Parameter, y = Bias, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = Bias, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+
+ggplot(beta_summary, aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+

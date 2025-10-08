@@ -127,7 +127,7 @@ $$
 
 
 ```{r}
-source("../PEAL-Multivariate/PEAL_Engine_Multi-RI.R")
+source("PEAL_Engine_Multi-RI.R")
 # XYZ
 Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
 X <- as.matrix(rearranged_data[, paste0("X", 1:px)])

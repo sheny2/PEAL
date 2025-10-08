@@ -4,7 +4,8 @@ library(data.table)
 library(dplyr)
 library(MASS)
 library(reshape2)
-library(ggplot2)
+library(doFuture)
+library(progressr)
 
 source("PEAL_Engine_Multi-RI.R")
 
@@ -30,7 +31,9 @@ quiet_stan <- function(...) {
 N <- 10
 num_cores <- detectCores() / 2
 cl <- makeCluster(num_cores)
-registerDoParallel(cl)
+# registerDoParallel(cl)
+registerDoFuture()
+plan(cluster, workers = cl)   # reuse your existing cluster 'cl
 
 # -------------------------
 # DGP Parameters
@@ -89,7 +92,13 @@ result_sigma_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), 
 # -------------------------
 # Simulation loop: fit BOTH models per replicate
 # -------------------------
-results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan")) %dopar% {
+results <- progressr::with_progress({
+  p <- progressr::progressor(steps = N)
+  foreach(k = 1:N,
+          .packages = c("data.table","dplyr","MASS","rstan"),
+          .options.future = list(seed = TRUE)) %dopar% {
+            
+            p(sprintf("iteration %d/%d", k, N))  # <-- progress line
   
   source("PEAL_Engine_Multi-RI.R")
   set.seed(k)
@@ -253,7 +262,7 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 4, iter = 1000, seed = 123,
+    chains = 4, iter = 500, seed = 123,
     refresh = 0
   )
   
@@ -274,7 +283,7 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 4, iter = 1000, seed = 123,
+    chains = 4, iter = 500, seed = 123,
     refresh = 0
   )
   
@@ -301,7 +310,8 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
        sigma_indep_bayes = c(out_indep_bayes$sigma_u_hat, out_indep_bayes$sigma_vh_hat, 
                             out_indep_bayes$sigma_e_hat, out_indep_bayes$rho_hat)
        )
-}
+          }
+})
 
 
 
