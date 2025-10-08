@@ -250,8 +250,7 @@ for (k in seq_len(N)) {
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 4, iter = 500, seed = 123,
-    refresh = 0
+    chains = 8, iter = 500
   )
   
   post <- rstan::extract(fit_cs)
@@ -271,8 +270,7 @@ for (k in seq_len(N)) {
   fit_cs <- quiet_stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 4, iter = 500, seed = 123,
-    refresh = 0
+    chains = 8, iter = 500
   )
   
   post <- rstan::extract(fit_cs)
@@ -410,8 +408,4 @@ ggplot(sigma_summary, aes(x = Parameter, y = Bias, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  labs(title = "Bias Comparison by Model and Parameter",
-       x = "Parameter",
-       y = "Bias")
-
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
