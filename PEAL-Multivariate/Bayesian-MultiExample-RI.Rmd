@@ -259,7 +259,8 @@ rstan_options(auto_write = TRUE)
 fit_cs <- stan(
   file = "mv_lmm_cs.stan",
   data = stan_data,
-  chains = 4, iter = 1000, seed = 123
+  chains = 4, iter = 1000, seed = 123,
+  refresh = 0
 )
 
 print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e", "rho"),
@@ -302,7 +303,8 @@ rstan_options(auto_write = TRUE)
 fit_cs <- stan(
   file = "mv_lmm_cs_indep.stan",
   data = stan_data,
-  chains = 4, iter = 1000, seed = 123
+  chains = 4, iter = 1000, seed = 123,
+  refresh = 0
 )
 
 print(fit_cs, pars = c("beta", "sigma_u", "sigma_v_h", "sigma_e"),

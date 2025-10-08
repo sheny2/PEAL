@@ -8,18 +8,13 @@ library(ggplot2)
 
 source("PEAL_Engine_Multi-RI.R")
 
-# -------------------------
-# Parallel setup
-# -------------------------
-N <- 100
-num_cores <- detectCores() / 2
-cl <- makeCluster(num_cores)
-registerDoParallel(cl)
+
+N <- 5
 
 # -------------------------
 # DGP Parameters
 # -------------------------
-H <- 5
+H <- 3
 m_hosp <- sample(10:30, H, replace = TRUE)
 px <- 6
 p_bin <- 3
@@ -31,7 +26,7 @@ beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
 
 # Variance components (SDs)
 sigma_u <- 0.3
-sigma_v_hosp <- c(0.61, 0.63, 0.65, 0.67, 0.69)
+sigma_v_hosp <- c(0.61, 0.65, 0.69)
 
 # sigma_u <- 0.3 * 10
 # sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
@@ -75,8 +70,13 @@ result_sigma_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), 
 # -------------------------
 # Simulation loop: fit BOTH models per replicate
 # -------------------------
-results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan")) %dopar% {
-  
+suppressPackageStartupMessages({
+  library(data.table); library(dplyr); library(MASS); library(rstan)
+})
+
+results <- vector("list", N)
+
+for (k in seq_len(N)) {
   source("PEAL_Engine_Multi-RI.R")
   set.seed(k)
   
@@ -156,7 +156,6 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
       return(list(beta = rep(NA_real_, px*py),
                   sigma = rep(NA_real_, H+3)))
     }
-    # Optional Hessian sign check (similar to your previous guard)
     if (!is.null(fit$opt$hessian)) {
       ev <- tryCatch(eigen(fit$opt$hessian)$value, error = function(e) NA)
       if (all(is.finite(ev)) && all(ev < 0)) {
@@ -206,88 +205,83 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   
   out_indep <- pack_fit(fit_indep, "independence")
   
-  
-  
-  # Baeysian
+  # ---- Bayesian (exchangeable)
   dat <- rearranged_data %>%
     mutate(site = as.integer(factor(site)),
            pat  = as.integer(interaction(site, patient, drop = TRUE)))
   
-  N   <- nrow(dat)
-  H   <- length(unique(dat$site))
-  P   <- length(unique(dat$pat))
-  R   <- py
+  Nobs_all <- nrow(dat)
+  H_all <- length(unique(dat$site))
+  P_all <- length(unique(dat$pat))
+  R_all <- py
   
-  site_id <- dat$site                            # length N, in {1,...,H}
-  pat_id  <- dat$pat                             # length N, in {1,...,P}
+  site_id <- dat$site
+  pat_id  <- dat$pat
   
-  # Map each patient to its site (needed to allow site-specific patient SDs)
   pat_site <- dat %>%
     distinct(pat = pat_id, site = site_id) %>%
     arrange(pat) %>%
     pull(site)
   
   stan_data <- list(
-    N = N, H = H, P = P, R = R, p = px,
+    N = Nobs_all, H = H_all, P = P_all, R = R_all, p = px,
     y = Y, X = X, site_id = site_id, pat_id = pat_id, pat_site = pat_site
   )
   
-  
-  options(mc.cores = 2)
+  options(mc.cores = parallelly::availableCores())
   rstan_options(auto_write = TRUE)
   
   fit_cs <- stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 2, iter = 2000, seed = 123,
+    chains = 4, iter = 1000, seed = 123,
     refresh = 0
   )
   
-  # Extract draws and produce tidy summaries:
   post <- rstan::extract(fit_cs)
   
   out_exch_bayes <- list(
-    beta_mean = as.vector(apply(post$beta, R, colMeans)),
+    beta_mean   = as.vector(apply(post$beta, R_all, colMeans)),
     sigma_u_hat = mean(post$sigma_u),
-    sigma_vh_hat = apply(post$sigma_v_h, 2, mean),
+    sigma_vh_hat= apply(post$sigma_v_h, 2, mean),
     sigma_e_hat = mean(post$sigma_e),
-    rho_hat = mean(post$rho)
+    rho_hat     = mean(post$rho)
   )
   
-  
-  
-  # bayesian indep
+  # ---- Bayesian (independence)
   fit_cs <- stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 2, iter = 2000, seed = 123,
+    chains = 4, iter = 1000, seed = 123,
     refresh = 0
   )
   
-  # Extract draws and produce tidy summaries:
   post <- rstan::extract(fit_cs)
   
   out_indep_bayes <- list(
-    beta_mean = as.vector(apply(post$beta, R, colMeans)),
+    beta_mean   = as.vector(apply(post$beta, R_all, colMeans)),
     sigma_u_hat = mean(post$sigma_u),
-    sigma_vh_hat = apply(post$sigma_v_h, 2, mean),
+    sigma_vh_hat= apply(post$sigma_v_h, 2, mean),
     sigma_e_hat = mean(post$sigma_e),
-    rho_hat = 0
+    rho_hat     = 0
   )
-
   
-  list(beta_exch  = out_exch$beta,
-       sigma_exch = out_exch$sigma,
-       beta_indep  = out_indep$beta,
-       sigma_indep = out_indep$sigma,
-       beta_exch_bayes = out_exch_bayes$beta_mean,
-       sigma_exch_bayes = c(out_exch_bayes$sigma_u_hat, out_exch_bayes$sigma_vh_hat, 
-                            out_exch_bayes$sigma_e_hat, out_exch_bayes$rho_hat),
-       beta_indep_bayes = out_indep_bayes$beta_mean,
-       sigma_indep_bayes = c(out_indep_bayes$sigma_u_hat, out_indep_bayes$sigma_vh_hat, 
-                            out_indep_bayes$sigma_e_hat, out_indep_bayes$rho_hat)
-       )
+  paste0("Current iterations finished: ", k)
+  
+  results[[k]] <- list(
+    beta_exch        = out_exch$beta,
+    sigma_exch       = out_exch$sigma,
+    beta_indep       = out_indep$beta,
+    sigma_indep      = out_indep$sigma,
+    beta_exch_bayes  = out_exch_bayes$beta_mean,
+    sigma_exch_bayes = c(out_exch_bayes$sigma_u_hat, out_exch_bayes$sigma_vh_hat,
+                         out_exch_bayes$sigma_e_hat, out_exch_bayes$rho_hat),
+    beta_indep_bayes = out_indep_bayes$beta_mean,
+    sigma_indep_bayes= c(out_indep_bayes$sigma_u_hat, out_indep_bayes$sigma_vh_hat,
+                         out_indep_bayes$sigma_e_hat, out_indep_bayes$rho_hat)
+  )
 }
+
 
 # -------------------------
 # Store into pre-allocated matrices
