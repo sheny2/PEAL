@@ -8,10 +8,26 @@ library(ggplot2)
 
 source("PEAL_Engine_Multi-RI.R")
 
+quiet_stan <- function(...) {
+  con <- file(nullfile(), open = "wt")
+  on.exit({
+    try(sink(type = "message"), silent = TRUE)
+    while (sink.number() > 0) try(sink(), silent = TRUE)
+    try(close(con), silent = TRUE)
+  }, add = TRUE)
+  
+  sink(con); sink(con, type = "message")  # silence stdout & messages
+  suppressWarnings(                      # silence warnings
+    suppressMessages(
+      rstan::stan(..., refresh = 0, open_progress = FALSE, verbose = FALSE)
+    )
+  )
+}
+
 # -------------------------
 # Parallel setup
 # -------------------------
-N <- 100
+N <- 10
 num_cores <- detectCores() / 2
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
@@ -19,7 +35,7 @@ registerDoParallel(cl)
 # -------------------------
 # DGP Parameters
 # -------------------------
-H <- 5
+H <- 3
 m_hosp <- sample(10:30, H, replace = TRUE)
 px <- 6
 p_bin <- 3
@@ -31,10 +47,8 @@ beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
 
 # Variance components (SDs)
 sigma_u <- 0.3
-sigma_v_hosp <- c(0.61, 0.63, 0.65, 0.67, 0.69)
+sigma_v_hosp <- c(0.61, 0.65, 0.69)
 
-# sigma_u <- 0.3 * 10
-# sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
 
 # Residual SD and exchangeable correlation
 sigma_e <- 0.5
@@ -233,13 +247,13 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   )
   
   
-  options(mc.cores = 2)
+  options(mc.cores = parallelly::availableCores())
   rstan_options(auto_write = TRUE)
   
-  fit_cs <- stan(
+  fit_cs <- quiet_stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 2, iter = 2000, seed = 123,
+    chains = 4, iter = 1000, seed = 123,
     refresh = 0
   )
   
@@ -257,10 +271,10 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
   
   
   # bayesian indep
-  fit_cs <- stan(
+  fit_cs <- quiet_stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 2, iter = 2000, seed = 123,
+    chains = 4, iter = 1000, seed = 123,
     refresh = 0
   )
   
@@ -288,6 +302,8 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS", "rstan"))
                             out_indep_bayes$sigma_e_hat, out_indep_bayes$rho_hat)
        )
 }
+
+
 
 # -------------------------
 # Store into pre-allocated matrices

@@ -14,6 +14,22 @@ library(Matrix)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 set.seed(123)
+
+quiet_stan <- function(...) {
+  con <- file(nullfile(), open = "wt")
+  on.exit({
+    try(sink(type = "message"), silent = TRUE)
+    while (sink.number() > 0) try(sink(), silent = TRUE)
+    try(close(con), silent = TRUE)
+  }, add = TRUE)
+
+  sink(con); sink(con, type = "message")  # silence stdout & messages
+  suppressWarnings(                      # silence warnings
+    suppressMessages(
+      rstan::stan(..., refresh = 0, open_progress = FALSE, verbose = FALSE)
+    )
+  )
+}
 ```
 
 
@@ -256,10 +272,10 @@ stan_data <- list(
 options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
-fit_cs <- stan(
+fit_cs <- quiet_stan(
   file = "mv_lmm_cs.stan",
   data = stan_data,
-  chains = 4, iter = 1000, seed = 123,
+  chains = 4, iter = 500, seed = 123,
   refresh = 0
 )
 
@@ -300,10 +316,10 @@ launch_shinystan(fit_cs)
 options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
-fit_cs <- stan(
+fit_cs <- quiet_stan(
   file = "mv_lmm_cs_indep.stan",
   data = stan_data,
-  chains = 4, iter = 1000, seed = 123,
+  chains = 4, iter = 500, seed = 123,
   refresh = 0
 )
 

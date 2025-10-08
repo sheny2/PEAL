@@ -8,8 +8,24 @@ library(ggplot2)
 
 source("PEAL_Engine_Multi-RI.R")
 
+quiet_stan <- function(...) {
+  con <- file(nullfile(), open = "wt")
+  on.exit({
+    try(sink(type = "message"), silent = TRUE)
+    while (sink.number() > 0) try(sink(), silent = TRUE)
+    try(close(con), silent = TRUE)
+  }, add = TRUE)
+  
+  sink(con); sink(con, type = "message")  # silence stdout & messages
+  suppressWarnings(                      # silence warnings
+    suppressMessages(
+      rstan::stan(..., refresh = 0, open_progress = FALSE, verbose = FALSE)
+    )
+  )
+}
 
-N <- 5
+
+N <- 10
 
 # -------------------------
 # DGP Parameters
@@ -231,10 +247,10 @@ for (k in seq_len(N)) {
   options(mc.cores = parallelly::availableCores())
   rstan_options(auto_write = TRUE)
   
-  fit_cs <- stan(
+  fit_cs <- quiet_stan(
     file = "mv_lmm_cs.stan",
     data = stan_data,
-    chains = 4, iter = 1000, seed = 123,
+    chains = 4, iter = 500, seed = 123,
     refresh = 0
   )
   
@@ -248,11 +264,14 @@ for (k in seq_len(N)) {
     rho_hat     = mean(post$rho)
   )
   
+  print(paste0("Current iterations finished: ", k, "-01"))
+  
+  
   # ---- Bayesian (independence)
-  fit_cs <- stan(
+  fit_cs <- quiet_stan(
     file = "mv_lmm_cs_indep.stan",
     data = stan_data,
-    chains = 4, iter = 1000, seed = 123,
+    chains = 4, iter = 500, seed = 123,
     refresh = 0
   )
   
@@ -266,7 +285,7 @@ for (k in seq_len(N)) {
     rho_hat     = 0
   )
   
-  paste0("Current iterations finished: ", k)
+  print(paste0("Current iterations finished: ", k, "-02"))
   
   results[[k]] <- list(
     beta_exch        = out_exch$beta,
@@ -282,6 +301,7 @@ for (k in seq_len(N)) {
   )
 }
 
+results <- results[!sapply(results, is.null)]
 
 # -------------------------
 # Store into pre-allocated matrices
@@ -297,7 +317,6 @@ for (k in seq_along(results)) {
   result_sigma_indep_bayeisan[, k] <- results[[k]]$sigma_indep_bayes
 }
 
-stopCluster(cl)
 
 # -------------------------
 # Long-format data with Model labels
