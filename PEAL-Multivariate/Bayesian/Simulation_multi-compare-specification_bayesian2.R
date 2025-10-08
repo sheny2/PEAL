@@ -394,8 +394,8 @@ print(p_beta_bias)
 print(p_sigma_bias)
 
 # Inspect numeric summaries in console
-beta_summary
-sigma_summary
+beta_summary %>% print(n = 100)
+sigma_summary %>% print(n = 100)
 
 
 
@@ -406,6 +406,18 @@ ggplot(beta_summary, aes(x = Parameter, y = Bias, fill = Model)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggplot(sigma_summary, aes(x = Parameter, y = Bias, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+ggplot(beta_summary, aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary, aes(x = Parameter, y = Variance, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +
