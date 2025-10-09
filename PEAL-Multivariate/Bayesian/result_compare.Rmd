@@ -5,7 +5,7 @@ author: "Yicheng Shen"
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = F, message = T)
 library(tidyverse)
 library(lme4)
 library(MASS)  
@@ -14,11 +14,15 @@ library(Matrix)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 results <- readRDS("results100.rds")
+results <- readRDS("results50.rds")
+results <- readRDS("results_cluster2.rds")
+# results <- readRDS("results_cluster.rds")
 N = 100
 ```
 
 ```{r}
 H <- 3
+H <- 5
 m_hosp <- sample(10:30, H, replace = TRUE)
 px <- 6
 p_bin <- 3
@@ -31,6 +35,8 @@ beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
 # Variance components (SDs)
 sigma_u <- 0.3
 sigma_v_hosp <- c(0.61, 0.65, 0.69)
+sigma_v_hosp <- c(0.61, 0.63, 0.65, 0.67, 0.69)
+sigma_v_hosp <- seq(0.5, 0.7, length.out = H)
 
 # sigma_u <- 0.3 * 10
 # sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
@@ -73,7 +79,10 @@ result_sigma_indep_bayeisan <- matrix(NA_real_, nrow = length(par_names_sigma), 
 # -------------------------
 # Store into pre-allocated matrices
 # -------------------------
-for (k in seq_along(results)) {
+# for (k in seq_along(results)) {
+for (k in seq_along(results)[-15]) {
+  # for (k in seq_along(results)[-69]) {
+# for (k in   seq_along(results)[-73]) {
   result_beta_exch[,  k] <- results[[k]]$beta_exch
   result_sigma_exch[, k] <- results[[k]]$sigma_exch
   result_beta_indep[,  k] <- results[[k]]$beta_indep
@@ -137,7 +146,7 @@ sigma_summary <- sigma_df %>%
   ) %>% arrange(Parameter, Model)
 ```
 
-```{r, fig.height=6}
+```{r, fig.height=8}
 # -------------------------
 # Plots: bias comparisons faceted by model
 # -------------------------
@@ -165,7 +174,7 @@ sigma_df %>%
 beta_summary %>% print(n=100)
 sigma_summary %>% print(n=100)
 
-ggplot(beta_summary, aes(x = Parameter, y = Bias, fill = Model)) +
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Bias, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +
@@ -179,13 +188,27 @@ ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = Bias
 
 
 
-ggplot(beta_summary, aes(x = Parameter, y = Variance, fill = Model)) +
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Variance, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = MSE, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = MSE, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +

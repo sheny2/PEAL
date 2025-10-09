@@ -13,7 +13,6 @@ library(data.table)
 library(Matrix)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-set.seed(123)
 
 quiet_stan <- function(...) {
   con <- file(nullfile(), open = "wt")
@@ -48,10 +47,12 @@ beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for c
 # Variance components
 sigma_u <- 0.3  # Site-level variance
 sigma_v_hosp <- runif(H, min = 0.5, max = 0.7)  # Varying sigma_v by hospital
+# sigma_u <- 3  # Site-level variance
+# sigma_v_hosp <- runif(H, min = 1, max = 2)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 0.4  # Error variance
-rho <- 0.5 # Correlation between outcomes
+sigma_e <- 0.5  # Error variance
+rho <- 0.8 # Correlation between outcomes
 rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
 diag(rho_mat) <- 1  # Diagonal elements are 1
 
@@ -272,10 +273,10 @@ stan_data <- list(
 options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
-fit_cs <- quiet_stan(
+fit_cs <- stan(
   file = "mv_lmm_cs.stan",
   data = stan_data,
-  chains = 4, iter = 500, seed = 123,
+  chains = 2, iter = 2000, 
   refresh = 0
 )
 
@@ -319,7 +320,7 @@ rstan_options(auto_write = TRUE)
 fit_cs <- quiet_stan(
   file = "mv_lmm_cs_indep.stan",
   data = stan_data,
-  chains = 4, iter = 500, seed = 123,
+  chains = 2, iter = 2000, 
   refresh = 0
 )
 
