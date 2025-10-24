@@ -13,14 +13,14 @@ library(data.table)
 library(Matrix)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-set.seed(123)
+# set.seed(123)
 ```
 
 
 ```{r}
 # Parameters
-H <- 5  # Number of sites
-m_hosp <- sample(30:50, H, replace = TRUE)  # Number of patients per site
+H <- 3  # Number of sites
+m_hosp <- sample(50:75, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -97,6 +97,7 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
   arrange(site, total_visits, patient) %>%
   mutate(site = factor(site))
 ```
+
 
 
 # PEAL 

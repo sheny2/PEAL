@@ -5,7 +5,7 @@ author: "Yicheng Shen"
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = F, message = T)
 library(tidyverse)
 library(lme4)
 library(MASS)  
@@ -317,7 +317,7 @@ launch_shinystan(fit_cs)
 options(mc.cores = parallelly::availableCores())
 rstan_options(auto_write = TRUE)
 
-fit_cs <- quiet_stan(
+fit_cs <- stan(
   file = "mv_lmm_cs_indep.stan",
   data = stan_data,
   chains = 2, iter = 2000, 
