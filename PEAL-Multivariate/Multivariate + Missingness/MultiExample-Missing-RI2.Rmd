@@ -37,7 +37,7 @@ knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 ```{r}
 # Parameters
 H <- 3  # Number of sites
-m_hosp <- sample(50:75, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(30:50, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -288,7 +288,7 @@ fit_mv_ind_missing_mice <- peal.fit.RI_mv(
 
 
 ```{r observed}
-source("PEAL_Engine_Missing_Multi-RI.R")
+source("PEAL_Engine_Missing_Multi-RI2.R")
 
 X_cols <- paste0("X", 1:px)
 Y_cols <- paste0("Y", 1:py)
@@ -329,6 +329,27 @@ fit_mv_ind_missing <- peal.fit.RI_mv_patterns(
 ```
 
 
+```{r}
+source("PEAL_Engine_Missing_Multi-RI2.R")
+fit_missing_em <- peal.em.fit.RI_mv(
+  data     = rearranged_data_with_missing,
+  X_cols   = X_cols,
+  Y_cols   = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "exchangeable",
+  em_iter = 3, reml = TRUE, rho_init = 0.1, verbose = TRUE
+)
+
+fit_missing_em_ind <- peal.em.fit.RI_mv(
+  data     = rearranged_data_with_missing,
+  X_cols   = X_cols,
+  Y_cols   = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "independence",
+  em_iter = 1, reml = TRUE, rho_init = 0, verbose = TRUE
+)
+```
+
 
 ```{r}
 cbind(
@@ -340,7 +361,9 @@ cbind(
 "missing_mice" = fit_mv_missing_mice$b,
 "ind_missing_mice" = fit_mv_ind_missing_mice$b,
 "missing" = fit_mv_missing$b,
-"ind_missing" = fit_mv_ind_missing$b
+"ind_missing" = fit_mv_ind_missing$b,
+"em_missing" = fit_missing_em$b,
+"ind_em_missing" = fit_missing_em_ind$b
 )
 ```
 
@@ -355,7 +378,9 @@ cbind(
 "missing_mice" = fit_mv_missing_mice$rho,
 "ind_missing_mice" = fit_mv_ind_missing_mice$rho,
 "missing" = fit_mv_missing$rho,
-"ind_missing" = fit_mv_ind_missing$rho
+"ind_missing" = fit_mv_ind_missing$rho,
+"em_missing" = fit_missing_em$rho,
+"ind_em_missing" = fit_missing_em_ind$rho
 )
 ```
 
@@ -370,7 +395,9 @@ cbind(
 "missing_mice" = fit_mv_missing_mice$s2 %>% sqrt(),
 "ind_missing_mice" = fit_mv_ind_missing_mice$s2 %>% sqrt(),
 "missing" = fit_mv_missing$s2 %>% sqrt(),
-"ind_missing" = fit_mv_ind_missing$s2 %>% sqrt()
+"ind_missing" = fit_mv_ind_missing$s2 %>% sqrt(),
+"em_missing" = fit_missing_em$s2 %>% sqrt(),
+"ind_em_missing" = fit_missing_em_ind$s2 %>% sqrt()
 )
 ```
 
@@ -385,7 +412,9 @@ cbind(
 "missing_mice" = sqrt(fit_mv_missing_mice$theta * fit_mv_missing_mice$s2),
 "ind_missing_mice" = sqrt(fit_mv_ind_missing_mice$theta * fit_mv_ind_missing_mice$s2),
 "missing" = sqrt(fit_mv_missing$theta * fit_mv_missing$s2),
-"ind_missing" = sqrt(fit_mv_ind_missing$theta * fit_mv_ind_missing$s2)
+"ind_missing" = sqrt(fit_mv_ind_missing$theta * fit_mv_ind_missing$s2),
+"em_missing" = sqrt(fit_missing_em$theta * fit_missing_em$history$init$s2),
+"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em$history$init$s2)
 )
 ```
 

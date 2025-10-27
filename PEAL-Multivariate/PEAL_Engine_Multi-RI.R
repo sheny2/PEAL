@@ -333,7 +333,9 @@ peal.fit.RI_mv <- function(Y, X, Z, id.site, weights = NULL,
   s2 <- res.profile$s2
 
   # Inference: Var(vec(beta)) = s2 * (bterm1)^{-1}
-  Vbeta <- solve(res.profile$allterms$bterm1) * s2
+  Lb <- chol(res.profile$allterms$bterm1)
+  Vbeta <- chol2inv(Lb) * s2
+  
   se    <- sqrt(diag(Vbeta))
   wald  <- res.profile$b / se
   lb    <- res.profile$b - 1.96 * se

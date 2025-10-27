@@ -373,7 +373,8 @@ mk_long <- function(mat, par_names, model_label, value_nm = "Estimate") {
 }
 
 
-saveRDS(store, file = "result.rds")
+# saveRDS(store, file = "result.rds")
+store <- readRDS("result.rds")
 
 # Beta
 beta_long <- do.call(rbind, lapply(names(store), function(nm) {
@@ -415,19 +416,23 @@ beta_long$Parameter <- factor(beta_long$Parameter, levels = paste0("Beta",1:(py*
 p_beta_bias <- beta_long %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.12, width = 0.15, height = 0) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
   geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
   facet_wrap(~ Model, ncol = 2, scales = "free_y") +
+  theme_bw() + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1, alpha = 0.4) +
   ggtitle("Fixed Effects Bias across 8 models")
 
 p_sigma_bias <- sigma_long %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.12, width = 0.15, height = 0) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
   geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
   facet_wrap(~ Model, ncol = 2, scales = "free_y") +
+  theme_bw() + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1, alpha = 0.4) + 
   ggtitle("Variance Components Bias across 8 models")
 
 print(p_beta_bias)
@@ -436,3 +441,47 @@ print(p_sigma_bias)
 # Inspect numeric summaries
 beta_summary
 sigma_summary
+
+
+
+
+
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Bias, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary, aes(x = Parameter, y = Bias, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary, aes(x = Parameter, y = Variance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+
+
+ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = MSE, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(sigma_summary %>% filter(Parameter != "rho"), aes(x = Parameter, y = MSE, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
