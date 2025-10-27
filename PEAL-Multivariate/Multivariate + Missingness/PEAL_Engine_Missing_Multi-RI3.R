@@ -507,6 +507,8 @@ peal.get.summary_mv_completed_EM <- function(data, X_cols, Y_cols,
   return(Sh)
 }
 
+
+
 # Profile likelihood using full-R summaries (no patterns)
 # par = (theta_u, theta_v_1, ..., theta_v_K[, rho])
 lmm.profile3_mv_full <- function(par, ShFull,
@@ -653,11 +655,171 @@ peal.fit.RI_mv_full_from_EMsumm <- function(ShFull, reml = TRUE,
 }
 
 
+
+
+
+
+
+# ---- NEW: One-shot E-step completed summaries from pattern summaries only ----
+# Inputs:
+#   ShPat : nested list from peal.get.summary_mv_patterns(...)
+#   beta_hat: length R*px vector, stacked by outcomes (same as prof$b)
+#   s2_hat, rho_hat: scalars
+# Output:
+#   ShFull : per-site full-R summaries {ShX, ShXZ, ShZ, ShXY, ShZY, ShYY, Nh, pzh}
+# ---- One-shot E-step: complete per-site full-R summaries from pattern summaries ----
+# Inputs:
+#   ShPat    : nested pattern summaries from peal.get.summary_mv_patterns(...)
+#              Each ShPat[[site]][[key]] has:
+#                ShX (p x p), ShXZ (p x p_z), ShZ (p_z x p_z),
+#                ShXY (p x s), ShZY (p_z x s), ShYY (s x s),
+#                Nh (int), pzh (int), idx_outcomes (length-s)
+#   beta_hat : length R*px vector of fixed-effect coeffs, stacked by outcomes
+#   s2_hat   : scalar residual scale
+#   rho_hat  : scalar exchangeable correlation (0 if independence)
+# Output:
+#   ShFull[[site]]: list with full-R blocks
+#       ShX (p x p), ShXZ (p x p_z), ShZ (p_z x p_z),
+#       ShXY (p x R), ShZY (p_z x R), ShYY (R x R),
+#       Nh (int), pzh (int)
+peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat, rho_hat, ridge = 1e-10) {
+  R  <- attr(ShPat, "R");  if (is.null(R)) stop("ShPat missing attr R")
+  px <- attr(ShPat, "px"); if (is.null(px)) stop("ShPat missing attr px")
+  sites <- names(ShPat)
+  
+  # reshape beta to p x R
+  B <- matrix(beta_hat, nrow = px, ncol = R)
+  
+  # residual covariance Sigma = s2 * [(1-rho)I + rho 11^T]
+  Rcorr <- (1 - rho_hat) * diag(R) + rho_hat * matrix(1, R, R)
+  Sigma <- s2_hat * Rcorr
+  
+  safe_solve <- function(A, b = NULL, add = ridge) {
+    # numerically stable solve with tiny ridge
+    if (is.null(b)) {
+      return(solve(A + add * diag(nrow(A))))
+    } else {
+      return(solve(A + add * diag(nrow(A)), b))
+    }
+  }
+  
+  ShFull <- vector("list", length = length(sites)); names(ShFull) <- sites
+  
+  for (sh in sites) {
+    S_h <- ShPat[[sh]]
+    if (length(S_h) == 0L) { ShFull[[sh]] <- NULL; next }
+    
+    # site-level accumulators
+    ShX  <- matrix(0, px, px)
+    ShXZ <- NULL; pzh <- NULL
+    ShZ  <- NULL
+    
+    ShXY_full <- matrix(0, px, R)
+    ShZY_full <- NULL
+    ShYY_full <- matrix(0, R, R)
+    Nh_site   <- 0L
+    
+    for (key in names(S_h)) {
+      S <- S_h[[key]]
+      o <- S$idx_outcomes           # observed outcome indices
+      s <- length(o)
+      m <- setdiff(seq_len(R), o)
+      
+      Nh_site <- Nh_site + S$Nh
+      if (is.null(ShXZ)) { ShXZ <- matrix(0, px,  S$pzh); pzh <- S$pzh }
+      if (is.null(ShZ))  { ShZ  <- matrix(0, S$pzh, S$pzh) }
+      if (is.null(ShZY_full)) ShZY_full <- matrix(0, pzh, R)
+      
+      # pattern-agnostic accumulators
+      ShX  <- ShX  + S$ShX
+      ShXZ <- ShXZ + S$ShXZ
+      ShZ  <- ShZ  + S$ShZ
+      
+      # observed blocks for this pattern
+      XYo  <- S$ShXY                 # p x |o|
+      ZYo  <- S$ShZY                 # pz x |o|
+      YYoo <- S$ShYY                 # |o| x |o|
+      B_o  <- B[, o, drop = FALSE]   # p x |o|
+      
+      # model projections
+      XEo <- S$ShX  %*% B_o                  # X' eta_o
+      ZEo <- t(S$ShXZ) %*% B_o               # Z' eta_o  (note the transpose!)
+      
+      # residual projections wrt X, Z
+      Xres_o <- XYo - XEo                    # X'(y_o - eta_o)
+      Zres_o <- ZYo - ZEo                    # Z'(y_o - eta_o)
+      
+      # add observed contributions directly
+      ShXY_full[, o] <- ShXY_full[, o] + XYo
+      ShZY_full[, o] <- ShZY_full[, o] + ZYo
+      ShYY_full[o, o] <- ShYY_full[o, o] + YYoo
+      
+      # if nothing missing for this pattern, continue
+      if (length(m) == 0L) next
+      
+      # partitions of Sigma and conditional weights
+      Soo <- Sigma[o, o, drop = FALSE]
+      Som <- Sigma[o, m, drop = FALSE]
+      Smm <- Sigma[m, m, drop = FALSE]
+      Sooinv <- safe_solve(Soo)
+      W <- Sooinv %*% Som                 # |o| x |m|
+      
+      # model projections for the missing block
+      B_m  <- B[, m, drop = FALSE]        # p x |m|
+      XE_m <- S$ShX  %*% B_m              # X' eta_m
+      ZE_m <- t(S$ShXZ) %*% B_m           # Z' eta_m
+      
+      # Completed X'Y and Z'Y for missing columns: X'(E[y_m]) = X'eta_m + X'(y_o-eta_o) W
+      ShXY_full[, m] <- ShXY_full[, m] + XE_m + Xres_o %*% W
+      ShZY_full[, m] <- ShZY_full[, m] + ZE_m + Zres_o %*% W
+      
+      # Cross block o-m of Y'Y:
+      # sum y_o E[y_m]^T = (X'Y_o)^T B_m + (YYoo - (X'Y_o)^T B_o) W
+      YoEta_m <- t(XYo) %*% B_m
+      YoResT  <- YYoo - t(XYo) %*% B_o          # sum y_o (y_o - eta_o)^T
+      ShYY_full[o, m] <- ShYY_full[o, m] + YoEta_m + YoResT %*% W
+      ShYY_full[m, o] <- t(ShYY_full[o, m])     # symmetry
+      
+      # m-m block of Y'Y:
+      # Var term: Nh * Var(y_m|y_o)
+      Vm <- Smm - t(Som) %*% Sooinv %*% Som
+      
+      # sum eta_m eta_m^T = B_m^T (X'X) B_m
+      Eta_mEta_mT <- t(B_m) %*% S$ShX %*% B_m
+      
+      # sum r_o r_o^T with r_o = y_o - eta_o:
+      # = YYoo - (X'Y_o)^T B_o - B_o^T (X'Y_o) + B_o^T (X'X) B_o
+      Res_oRes_oT <- YYoo - t(XYo) %*% B_o - t(B_o) %*% XYo + t(B_o) %*% S$ShX %*% B_o
+      
+      # propagation of residuals onto m via W:
+      Prop_m <- t(W) %*% Res_oRes_oT %*% W
+      
+      # cross terms: sum [eta_m r_o^T W + W^T r_o eta_m^T]
+      Cross <- t(B_m) %*% Xres_o %*% W + t(W) %*% t(Xres_o) %*% B_m
+      
+      ShYY_full[m, m] <- ShYY_full[m, m] +
+        S$Nh * Vm + Eta_mEta_mT + Prop_m + Cross
+    }
+    
+    ShFull[[sh]] <- list(
+      ShX = ShX, ShXZ = ShXZ, ShZ = ShZ,
+      ShXY = ShXY_full, ShZY = ShZY_full, ShYY = ShYY_full,
+      Nh = Nh_site, pzh = pzh
+    )
+  }
+  
+  attr(ShFull, "R")  <- R
+  attr(ShFull, "px") <- px
+  ShFull
+}
+
+
 # EM driver:
 #   - Initialize with your pattern-aware fit (M0).
 #   - E-step: complete per-site full-R summaries using current params.
 #   - M-step: refit using full-R summaries (no patterns).
 # Repeat em_iter times (usually 1–2 is enough).
+# ---- REPLACE the EM loop body in peal.em.fit.RI_mv() ----
 peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
                               site_col = "site", patient_col = "patient",
                               weights = NULL, reml = TRUE,
@@ -669,11 +831,17 @@ peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
   R <- length(Y_cols)
   estimate_rho_all <- (corstr_init == "exchangeable")
   
+  # ----- One-shot collection (sites send exactly once) -----
+  ShPat <- peal.get.summary_mv_patterns(
+    data, X_cols, Y_cols,
+    site_col = site_col, patient_col = patient_col, weights = weights
+  )
+  
+  # ----- Initial pattern-aware fit (M0) -----
   init_fit <- peal.fit.RI_mv_patterns(
     data, X_cols, Y_cols,
-    site_col = site_col, patient_col = patient_col,
-    weights = weights, reml = reml,
-    corstr = corstr_init,
+    site_col = site_col, patient_col = patient_col, weights = weights,
+    reml = reml, corstr = corstr_init,
     mypar.init = mypar.init,
     rho_init = if (estimate_rho_all) rho_init else 0,
     hessian = TRUE, verbose = verbose
@@ -682,22 +850,24 @@ peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
   hist <- list(init = init_fit)
   cur  <- init_fit
   
+  # ----- Exactly one EM iteration at the lead (default em_iter = 1) -----
   for (it in seq_len(em_iter)) {
-    if (verbose) cat(sprintf("\n[EM] Iteration %d\n", it))
+    if (verbose) cat(sprintf("\n[EM] Iteration %d (one-shot, no new site stats)\n", it))
     
-    ShFull <- peal.get.summary_mv_completed_EM(
-      data, X_cols, Y_cols,
-      site_col = site_col, patient_col = patient_col, weights = weights,
+    # E-step (lead only): complete full-R summaries from *pattern* summaries
+    ShFull <- peal.complete_from_patterns(
+      ShPat,
       beta_hat = cur$b,
       s2_hat   = cur$s2,
       rho_hat  = if (estimate_rho_all) cur$rho else 0
     )
     
+    # M-step on completed full summaries (optimize theta and optionally rho)
     mfit <- peal.fit.RI_mv_full_from_EMsumm(
       ShFull, reml = reml,
       estimate_rho = estimate_rho_all,
       rho_init     = if (estimate_rho_all) cur$rho else 0,
-      mypar.init   = c(cur$theta),
+      mypar.init   = c(cur$theta),   # <-- takes θ from first step into account
       hessian = TRUE, verbose = verbose
     )
     
@@ -705,13 +875,11 @@ peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
     cur <- mfit
   }
   
+  # housekeeping and reporting
   cur$history <- hist
   cur$em_iter <- em_iter
-  
-  # ---- Report theta from the pre-EM (pattern-only) initializer ----
-  cur$theta_em <- cur$theta                 # keep EM-updated theta (for reference)
-  cur$theta    <- hist$init$theta           # <-- overwrite reported theta
-  
+  cur$theta_em <- cur$theta             # keep the EM-updated θ for reference
+  cur$theta    <- hist$init$theta       # <-- report θ from pre-EM initializer (as you asked)
   class(cur) <- c("mvpeal_em_fit", class(cur))
   return(cur)
 }

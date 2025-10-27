@@ -337,7 +337,29 @@ fit_missing_em <- peal.em.fit.RI_mv(
   Y_cols   = Y_cols,
   site_col = "site", patient_col = "patient",
   corstr_init = "exchangeable",
-  em_iter = 3, reml = TRUE, rho_init = 0.1, verbose = TRUE
+  em_iter = 1, reml = TRUE, rho_init = 0.1, verbose = TRUE
+)
+
+fit_missing_em_ind <- peal.em.fit.RI_mv(
+  data     = rearranged_data_with_missing,
+  X_cols   = X_cols,
+  Y_cols   = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "independence",
+  em_iter = 1, reml = TRUE, rho_init = 0, verbose = TRUE
+)
+```
+
+
+```{r}
+source("PEAL_Engine_Missing_Multi-RI3.R")
+fit_missing_em <- peal.em.fit.RI_mv(
+  data     = rearranged_data_with_missing,
+  X_cols   = X_cols,
+  Y_cols   = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "exchangeable",
+  em_iter = 1, reml = TRUE, rho_init = 0.1, verbose = TRUE
 )
 
 fit_missing_em_ind <- peal.em.fit.RI_mv(
@@ -414,7 +436,7 @@ cbind(
 "missing" = sqrt(fit_mv_missing$theta * fit_mv_missing$s2),
 "ind_missing" = sqrt(fit_mv_ind_missing$theta * fit_mv_ind_missing$s2),
 "em_missing" = sqrt(fit_missing_em$theta * fit_missing_em$history$init$s2),
-"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em$history$init$s2)
+"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em_ind$history$init$s2)
 )
 ```
 

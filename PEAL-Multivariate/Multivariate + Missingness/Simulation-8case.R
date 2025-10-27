@@ -373,8 +373,8 @@ mk_long <- function(mat, par_names, model_label, value_nm = "Estimate") {
 }
 
 
-# saveRDS(store, file = "result.rds")
-store <- readRDS("result.rds")
+# saveRDS(store, file = "result8.rds")
+store <- readRDS("result8.rds")
 
 # Beta
 beta_long <- do.call(rbind, lapply(names(store), function(nm) {
