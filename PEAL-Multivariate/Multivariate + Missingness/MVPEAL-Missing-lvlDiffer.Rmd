@@ -18,26 +18,11 @@ knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 ```
 
 
-<!-- # Option 2: Different missingness patterns for each outcome -->
-<!-- # rearranged_data_with_missing <- rearranged_data -->
-<!-- # rearranged_data_with_missing$Y1[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.7))] <- NA  # 70% missing in Y1 -->
-<!-- # rearranged_data_with_missing$Y2[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.5))] <- NA  # 50% missing in Y2   -->
-<!-- # rearranged_data_with_missing$Y3[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.8))] <- NA  # 80% missing in Y3 -->
-
-<!-- # Option 3: Missingness dependent on covariates (MAR) -->
-<!-- # rearranged_data_with_missing <- rearranged_data -->
-<!-- # # Higher missingness when X1 = 1 -->
-<!-- # rearranged_data_with_missing$Y1[rearranged_data_with_missing$X1 == 1 &  -->
-<!-- #                                  runif(nrow(rearranged_data)) < 0.8] <- NA -->
-<!-- # # Higher missingness for extreme values of continuous covariates -->
-<!-- # rearranged_data_with_missing$Y2[abs(rearranged_data_with_missing$X4) > 1.5 &  -->
-<!-- #                                  runif(nrow(rearranged_data)) < 0.7] <- NA -->
-
 
 ```{r}
 # Parameters
 H <- 3  # Number of sites
-m_hosp <- sample(30:50, H, replace = TRUE)  # Number of patients per site
+m_hosp <- sample(50:75, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -117,18 +102,54 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 
 
 # Introduce substantial missingness in Y_1 to Y_R
-# Option 1: missingness rate 
-missing_prob <- 0.4
+# rearranged_data_with_missing <- rearranged_data
+# for(y_col in paste0("Y", 1:py)) {
+#   missing_indices <- sample(1:nrow(rearranged_data), 
+#                            size = round(nrow(rearranged_data) * missing_prob))
+#   rearranged_data_with_missing[missing_indices, y_col] <- NA
+# }
 
-# Introduce missing values completely at random (MCAR)
+# Option 2: Different missingness patterns for each outcome
+# rearranged_data_with_missing <- rearranged_data
+# rearranged_data_with_missing$Y1[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.2))] <- NA
+# rearranged_data_with_missing$Y2[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.3))] <- NA
+# rearranged_data_with_missing$Y3[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.6))] <- NA
+
+# Option 3: MAR
 rearranged_data_with_missing <- rearranged_data
+n <- nrow(rearranged_data)
 
-# First pass: introduce missingness for each Y variable
-for(y_col in paste0("Y", 1:py)) {
-  missing_indices <- sample(1:nrow(rearranged_data), 
-                           size = round(nrow(rearranged_data) * missing_prob))
-  rearranged_data_with_missing[missing_indices, y_col] <- NA
-}
+# Step 1. Start with baseline missingness probabilities
+p1_base <- 0.2   # baseline for Y1
+p2_base <- 0.3   # baseline for Y2
+p3_base <- 0.5   # baseline for Y3
+
+# Step 2. For Y3: missingness depends on whether Y1 and Y2 are observed
+# If both Y1 and Y2 are observed → Y3 more likely missing
+Y3_miss_prob <- ifelse(!is.na(rearranged_data$Y1) & !is.na(rearranged_data$Y2), 
+                       p3_base + 0.25,  # boost missingness
+                       p3_base - 0.25)  # lower missingness
+Y3_miss_prob <- pmin(pmax(Y3_miss_prob, 0), 1)
+Y3_missing <- rbinom(n, 1, Y3_miss_prob) == 1
+rearranged_data_with_missing$Y3[Y3_missing] <- NA
+
+# Step 3. For Y1 and Y2: missingness depends on whether Y3 is observed
+# If Y3 is observed → Y1/Y2 more likely missing
+Y1_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
+                       p1_base + 0.2, 
+                       p1_base - 0.1)
+Y2_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
+                       p2_base + 0.2, 
+                       p2_base - 0.1)
+Y1_miss_prob <- pmin(pmax(Y1_miss_prob, 0), 1)
+Y2_miss_prob <- pmin(pmax(Y2_miss_prob, 0), 1)
+
+Y1_missing <- rbinom(n, 1, Y1_miss_prob) == 1
+Y2_missing <- rbinom(n, 1, Y2_miss_prob) == 1
+
+rearranged_data_with_missing$Y1[Y1_missing] <- NA
+rearranged_data_with_missing$Y2[Y2_missing] <- NA
+
 
 # Ensure no cases where all Ys are missing
 all_y_missing <- apply(rearranged_data_with_missing[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
@@ -147,6 +168,9 @@ if (num_all_missing > 0) {
 # Check the missingness pattern
 cat("Missingness summary:\n")
 print(sapply(rearranged_data_with_missing[paste0("Y", 1:py)], function(x) mean(is.na(x))))
+
+mice::md.pattern(rearranged_data_with_missing[,paste0("Y",1:py)])
+
 
 # Verify no cases have all Ys missing
 all_y_still_missing <- apply(rearranged_data_with_missing[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
@@ -174,6 +198,7 @@ for(site_id in sites) {
 # Combine all site-specific imputed datasets
 rearranged_data_with_missing_mice <- do.call(rbind, imputed_datasets)
 ```
+
 
 
 ```{r full}
@@ -288,7 +313,7 @@ fit_mv_ind_missing_mice <- peal.fit.RI_mv(
 
 
 ```{r observed}
-source("PEAL_Engine_Missing_Multi-RI2.R")
+source("PEAL_Engine_Missing_Multi-RI3.R")
 
 X_cols <- paste0("X", 1:px)
 Y_cols <- paste0("Y", 1:py)
@@ -325,28 +350,6 @@ fit_mv_ind_missing <- peal.fit.RI_mv_patterns(
   corstr   = "independence",  
   rho_init = 0.1,
   verbose  = TRUE
-)
-```
-
-
-```{r}
-source("PEAL_Engine_Missing_Multi-RI2.R")
-fit_missing_em <- peal.em.fit.RI_mv(
-  data     = rearranged_data_with_missing,
-  X_cols   = X_cols,
-  Y_cols   = Y_cols,
-  site_col = "site", patient_col = "patient",
-  corstr_init = "exchangeable",
-  em_iter = 1, reml = TRUE, rho_init = 0.1, verbose = TRUE
-)
-
-fit_missing_em_ind <- peal.em.fit.RI_mv(
-  data     = rearranged_data_with_missing,
-  X_cols   = X_cols,
-  Y_cols   = Y_cols,
-  site_col = "site", patient_col = "patient",
-  corstr_init = "independence",
-  em_iter = 1, reml = TRUE, rho_init = 0, verbose = TRUE
 )
 ```
 

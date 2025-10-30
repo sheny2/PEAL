@@ -28,13 +28,13 @@ cc <- function(df, Y_cols = grep("^Y", names(df), value = TRUE)) {
 # -------------------------
 # Core settings 
 # -------------------------
-N      <- 3                 # number of replicates
-H      <- 3                  # sites
+N      <- 200                # number of replicates
+H      <- 5                  # sites
 px     <- 6                  # covariates
 p_bin  <- 3
 p_cont <- px - p_bin
 py     <- 3                  # outcomes
-m_hosp_range <- 30:50        # patients per site
+m_hosp_range <- 50:70        # patients per site
 nvisit_range <- 1:20         # visits per patient
 
 # True parameters (fixed across replicates for clear bias eval)
@@ -113,13 +113,53 @@ simulate_one <- function(seed) {
     arrange(site, total_visits, patient) |>
     mutate(site = factor(site))
   
-  # Introduce MCAR (30%) with safeguard (no row has all Y missing)
-  missing_prob <- 0.3
+  # Introduce MCAR 
+  missing_prob <- 0.4
   dat_miss <- dat_ord
-  for (ycol in paste0("Y", 1:py)) {
-    idx <- sample.int(nrow(dat_miss), size = round(nrow(dat_miss) * missing_prob))
-    dat_miss[idx, ycol] <- NA
-  }
+  # for (ycol in paste0("Y", 1:py)) {
+  #   idx <- sample.int(nrow(dat_miss), size = round(nrow(dat_miss) * missing_prob))
+  #   dat_miss[idx, ycol] <- NA
+  # }
+
+  # Introduce MCAR 2.
+  # dat_miss$Y1[sample(1:nrow(dat_ord), round(nrow(dat_ord)*0.2))] <- NA
+  # dat_miss$Y2[sample(1:nrow(dat_ord), round(nrow(dat_ord)*0.3))] <- NA
+  # dat_miss$Y3[sample(1:nrow(dat_ord), round(nrow(dat_ord)*0.6))] <- NA
+
+  # Introduce MAR
+  # Step 1. Start with baseline missingness probabilities
+  n <- nrow(dat_ord)
+  p1_base <- 0.2   # baseline for Y1
+  p2_base <- 0.3   # baseline for Y2
+  p3_base <- 0.5   # baseline for Y3
+
+  # Step 2. For Y3: missingness depends on whether Y1 and Y2 are observed
+  # If both Y1 and Y2 are observed → Y3 more likely missing
+  Y3_miss_prob <- ifelse(!is.na(dat_ord$Y1) & !is.na(dat_ord$Y2),
+                         p3_base + 0.25,  # boost missingness
+                         p3_base - 0.25)  # lower missingness
+  Y3_miss_prob <- pmin(pmax(Y3_miss_prob, 0), 1)
+  Y3_missing <- rbinom(n, 1, Y3_miss_prob) == 1
+  dat_miss$Y3[Y3_missing] <- NA
+
+  # Step 3. For Y1 and Y2: missingness depends on whether Y3 is observed
+  # If Y3 is observed → Y1/Y2 more likely missing
+  Y1_miss_prob <- ifelse(!is.na(dat_miss$Y3),
+                         p1_base + 0.2,
+                         p1_base - 0.1)
+  Y2_miss_prob <- ifelse(!is.na(dat_miss$Y3),
+                         p2_base + 0.2,
+                         p2_base - 0.1)
+  Y1_miss_prob <- pmin(pmax(Y1_miss_prob, 0), 1)
+  Y2_miss_prob <- pmin(pmax(Y2_miss_prob, 0), 1)
+
+  Y1_missing <- rbinom(n, 1, Y1_miss_prob) == 1
+  Y2_missing <- rbinom(n, 1, Y2_miss_prob) == 1
+
+  dat_miss$Y1[Y1_missing] <- NA
+  dat_miss$Y2[Y2_missing] <- NA
+  
+  
   all_y_missing <- apply(dat_miss[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
   if (any(all_y_missing)) {
     for (i in which(all_y_missing)) {
@@ -289,7 +329,6 @@ fit_eight <- function(dsets) {
     error = function(e) NULL
   )
   
-  
   # -- Observed-pattern summaries with EM
   fit_pat_ex_em <- tryCatch(
     peal.em.fit.RI_mv(
@@ -344,8 +383,10 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS","mice")) %
 stopCluster(cl)
 
 
-saveRDS(results, file = "result10.rds")
-results <- readRDS("result10.rds")
+# saveRDS(results, file = "result10_difflvl.rds")
+results <- readRDS("result10_difflvl.rds")
+# results <- readRDS("result10.rds")
+
 
 # -------------------------
 # Collect results into matrices
@@ -392,7 +433,7 @@ for (k in seq_along(results)) {
   store$OBS_EM_EX$beta[, k]  <- results[[k]]$patt_em_ex$b
   store$OBS_EM_EX$sigma[,k]  <- c(results[[k]]$patt_ex$sigma[1:(H+1)], results[[k]]$patt_em_ex$sigma[(H+2):(H+3)])
   
-  store$OBS_EM_EX$beta[, k]  <- results[[k]]$patt_em_in$b
+  store$OBS_EM_IN$beta[, k]  <- results[[k]]$patt_em_in$b
   store$OBS_EM_IN$sigma[,k]  <- c(results[[k]]$patt_in$sigma[1:(H+1)], results[[k]]$patt_em_in$sigma[(H+2):(H+3)])
 }
 
@@ -450,22 +491,24 @@ p_beta_bias <- beta_long %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
   geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
+  # geom_violin(alpha = 1, trim = F, color = F,  fill = "lightblue") +
   facet_wrap(~ Model, ncol = 2, scales = "free_y") +
   theme_bw() + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1, alpha = 0.4) +
-  ggtitle("Fixed Effects Bias across 8 models")
+  ggtitle("Fixed Effects Bias across 10 models")
 
 p_sigma_bias <- sigma_long %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
   geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
+  # geom_violin(alpha = 1, trim = F, color = F,  fill = "lightblue") +
   facet_wrap(~ Model, ncol = 2, scales = "free_y") +
   theme_bw() + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   geom_hline(yintercept = 0, color = "red", linetype = "dashed", size = 1, alpha = 0.4) + 
-  ggtitle("Variance Components Bias across 8 models")
+  ggtitle("Variance Components Bias across 10 models")
 
 print(p_beta_bias)
 print(p_sigma_bias)
@@ -476,8 +519,7 @@ sigma_summary
 
 
 
-
-
+# Additional Visual
 ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Bias, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +

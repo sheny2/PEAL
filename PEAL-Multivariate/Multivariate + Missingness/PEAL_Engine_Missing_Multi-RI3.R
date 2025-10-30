@@ -291,8 +291,6 @@ lmm.profile3_mv_patterns <- function(par, ShPat,
 
 
 
-
-
 peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
                                     site_col = "site", patient_col = "patient",
                                     weights = NULL, reml = TRUE,
@@ -394,121 +392,6 @@ peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
 
 
 #### EM 
-
-# Build Sigma_e from (s2, rho)
-.Sigma_from_rho <- function(R, s2, rho) {
-  Rcorr <- (1 - rho) * diag(R) + rho * matrix(1, R, R)
-  s2 * Rcorr
-}
-
-# E-step: compute completed (full-R) sufficient statistics per site:
-#   ShX, ShXZ, ShZ, ShXY_full (px x R), ShZY_full (pzh x R), ShYY_full (R x R), Nh
-# Uses current (beta_hat, s2_hat, rho_hat). Random intercepts have mean 0, so
-# we condition on fixed-effects mean only (this is exact for RI-only with independent outcomes' RIs).
-peal.get.summary_mv_completed_EM <- function(data, X_cols, Y_cols,
-                                             site_col = "site", patient_col = "patient",
-                                             weights = NULL,
-                                             beta_hat, s2_hat, rho_hat) {
-  X <- as.matrix(data[, X_cols, drop = FALSE])
-  Y <- as.matrix(data[, Y_cols, drop = FALSE])
-  R <- ncol(Y)
-  px <- ncol(X)
-  if (is.null(weights)) weights <- rep(1, nrow(X))
-  sites <- as.character(data[[site_col]])
-  
-  # beta_hat is length R*px stacked by outcomes; reshape to p x R
-  if (length(beta_hat) != R * px) stop("beta_hat length must be R*px.")
-  B <- matrix(beta_hat, nrow = px, ncol = R)
-  
-  # robust Z per site (aligned with row order within each site)
-  Z_list <- build_Z_list_by_site(data, site_col = site_col, patient_col = patient_col)
-  
-  # residual covariance
-  Sigma <- .Sigma_from_rho(R, s2_hat, rho_hat)
-  
-  Sh <- list()
-  for (sh in unique(sites)) {
-    idx <- which(sites == sh)
-    if (!length(idx)) next
-    Xh <- X[idx,, drop = FALSE]
-    Yh <- Y[idx,, drop = FALSE]
-    Zh <- Z_list[[sh]]
-    wh <- weights[idx]
-    
-    pzh <- ncol(Zh)
-    
-    # accumulators (full-R)
-    ShX  <- matrix(0, px,  px)
-    ShXZ <- matrix(0, px,  pzh)
-    ShZ  <- matrix(0, pzh, pzh)
-    
-    ShXY <- matrix(0, px,  R)
-    ShZY <- matrix(0, pzh, R)
-    ShYY <- matrix(0, R,   R)
-    Nh   <- nrow(Xh)
-    
-    for (j in seq_len(Nh)) {
-      xj <- matrix(Xh[j,, drop = TRUE], nrow = 1)   # 1 x p
-      zj <- matrix(Zh[j,, drop = TRUE], nrow = 1)   # 1 x pzh
-      yj <- as.numeric(Yh[j,, drop = TRUE])
-      wj <- wh[j]
-      
-      obs <- which(!is.na(yj))
-      mis <- which(is.na(yj))
-      
-      # mean under current beta (RI means are zero)
-      eta <- as.numeric(xj %*% B)  # length R
-      
-      if (length(mis) == 0L) {
-        Ey  <- yj
-        Eyy <- tcrossprod(yj)       # y y^T
-      } else if (length(obs) == 0L) {
-        # nothing observed: E[y]=eta; Var[y]=Sigma
-        Ey  <- eta
-        Eyy <- Sigma + tcrossprod(Ey)
-      } else {
-        # conditional moments for the missing block
-        Soo <- Sigma[obs, obs, drop = FALSE]
-        Som <- Sigma[obs, mis, drop = FALSE]
-        Smm <- Sigma[mis, mis, drop = FALSE]
-        
-        # E[y_m | y_o]
-        mu_m <- eta[mis] + t(Som) %*% solve(Soo, (yj[obs] - eta[obs]))
-        mu_m <- as.numeric(mu_m)
-        
-        # Var[y_m | y_o]
-        V_m  <- Smm - t(Som) %*% solve(Soo, Som)
-        
-        Ey <- eta
-        Ey[obs] <- yj[obs]
-        Ey[mis] <- mu_m
-        
-        # E[yy^T | y_o] = Var(y|y_o) + E[y|y_o]E[y|y_o]^T
-        Eyy <- tcrossprod(Ey)
-        Eyy[mis, mis] <- Eyy[mis, mis] + V_m
-      }
-      
-      # accumulate with weight
-      ShX  <- ShX  + wj * crossprod(xj, xj)
-      ShXZ <- ShXZ + wj * crossprod(xj, zj)
-      ShZ  <- ShZ  + wj * crossprod(zj, zj)
-      
-      ShXY <- ShXY + wj * (t(xj) %*% matrix(Ey, nrow = 1))    # (p x 1) %*% (1 x R) -> p x R
-      ShZY <- ShZY + wj * (t(zj) %*% matrix(Ey, nrow = 1))    # (pzh x 1) %*% (1 x R) -> pzh x R
-      ShYY <- ShYY + wj * Eyy
-    }
-    
-    Sh[[sh]] <- list(ShX = ShX, ShXZ = ShXZ, ShXY = ShXY,
-                     ShZ = ShZ, ShZY = ShZY, ShYY = ShYY,
-                     Nh = Nh, pzh = pzh)
-  }
-  attr(Sh, "R")  <- R
-  attr(Sh, "px") <- px
-  return(Sh)
-}
-
-
-
 # Profile likelihood using full-R summaries (no patterns)
 # par = (theta_u, theta_v_1, ..., theta_v_K[, rho])
 lmm.profile3_mv_full <- function(par, ShFull,
@@ -653,9 +536,6 @@ peal.fit.RI_mv_full_from_EMsumm <- function(ShFull, reml = TRUE,
        theta = res$par[1:pz], rho = rho_hat, Sigma_e = Sigma_e,
        s2 = s2, opt = res, res.profile = prof)
 }
-
-
-
 
 
 
