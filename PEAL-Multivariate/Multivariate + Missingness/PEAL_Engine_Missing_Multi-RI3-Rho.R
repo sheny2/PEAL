@@ -75,6 +75,38 @@ build_Z_list_by_site <- function(data, site_col = "site", patient_col = "patient
 }
 
 
+# -------------------------
+# General (unstructured) residual correlation utilities
+# Parameterization: free lower-triangular (unit diag) -> S = L L^T -> Corr = cov2cor(S)
+# par_corr length = R*(R-1)/2 ordered as (2,1), (3,1),(3,2), ..., (R,1),...,(R,R-1)
+# Returns: list(Corr, Rinve, logdet_Rcorr)
+# -------------------------
+.Corr_from_cholfree <- function(R, par_corr, jitter = 1e-8) {
+  stopifnot(length(par_corr) == R*(R-1)/2)
+  L <- diag(1, R)
+  idx <- 1
+  for (i in 2:R) for (j in 1:(i-1)) { L[i, j] <- par_corr[idx]; idx <- idx + 1 }
+  S <- L %*% t(L)                 # SPD by construction
+  Corr <- cov2cor(S)              # unit-diagonal correlation
+  Cj <- Corr + diag(jitter, R)    # stabilize
+  U  <- chol(Cj)
+  Rinve <- chol2inv(U)            # Corr^{-1}
+  logdet <- 2 * sum(log(diag(U))) # log|Corr|
+  list(Corr = Corr, Rinve = Rinve, logdet_Rcorr = logdet)
+}
+
+# For a subset of outcomes (pattern of size s) given a FULL Corr (R x R)
+# returns inverse and logdet of Corr[o,o].
+.Corr_subset_inv_logdet <- function(Corr, o, jitter = 1e-8) {
+  Coo <- Corr[o, o, drop = FALSE]
+  Coo <- Coo + diag(jitter, nrow(Coo))
+  Uoo <- chol(Coo)
+  inv <- chol2inv(Uoo)
+  ld  <- 2 * sum(log(diag(Uoo)))
+  list(Rinve = inv, logdet_Rcorr = ld)
+}
+
+
 
 
 # Build lossless one-shot summaries stratified by (site, outcome-missingness pattern).
@@ -158,114 +190,123 @@ peal.get.summary_mv_patterns <- function(data, X_cols, Y_cols,
 
 
 
-# par: c(theta_u, theta_v_1, ..., theta_v_K[, rho])
-# ShPat: nested summaries from peal.get.summary_mv_patterns()
 lmm.profile3_mv_patterns <- function(par, ShPat,
                                      reml = TRUE,
+                                     corstr = c("exchangeable","independence","unstructured"),
                                      estimate_rho = TRUE, rho_fixed = 0,
                                      verbose = FALSE) {
-  R  <- attr(ShPat, "R"); if (is.null(R)) stop("Sh summaries missing R.")
+  corstr <- match.arg(corstr)
+  R  <- attr(ShPat, "R");  if (is.null(R)) stop("Sh summaries missing R.")
   px <- attr(ShPat, "px"); if (is.null(px)) stop("Sh summaries missing px.")
-  sites <- names(ShPat)
-  K <- length(sites)
+  sites <- names(ShPat); K <- length(sites)
   pz <- K + 1  # theta_u + theta_vh per site
+  q  <- if (corstr == "unstructured") R*(R-1)/2 else 0
   
-  # parse parameters
-  if (estimate_rho) {
-    if (length(par) != (pz + 1)) stop("par must include rho as last element.")
-    rho <- par[pz + 1]
-  } else {
-    rho <- rho_fixed
-    if (length(par) != pz) stop("par length must be K+1 when rho is fixed.")
+  # ----- parse parameters / correlation structure -----
+  if (corstr == "independence") {
+    stopifnot(length(par) == pz)
+    rho <- 0; Corr <- diag(R)
+  } else if (corstr == "exchangeable") {
+    if (estimate_rho) {
+      stopifnot(length(par) == pz + 1)
+      rho <- par[pz + 1]; Corr <- (1 - rho) * diag(R) + rho * matrix(1, R, R)
+    } else {
+      stopifnot(length(par) == pz)
+      rho <- rho_fixed;   Corr <- (1 - rho) * diag(R) + rho * matrix(1, R, R)
+    }
+  } else { # unstructured
+    stopifnot(estimate_rho)
+    stopifnot(length(par) == pz + q)
+    par_corr <- par[(pz + 1):(pz + q)]
+    Corr <- .Corr_from_cholfree(R, par_corr)$Corr
+    rho <- NA_real_
   }
   
-  # accumulators
-  lpterm1 <- 0
-  lpterm2 <- 0
-  remlterm <- 0
+  # ----- accumulators -----
+  lpterm1 <- 0; lpterm2 <- 0; remlterm <- 0
   bterm1 <- matrix(0, R*px, R*px)
   bterm2 <- rep(0, R*px)
   Nsum <- 0
   
   for (h in seq_len(K)) {
-    sh <- sites[h]
-    S_h <- ShPat[[sh]]
+    sh <- sites[h]; S_h <- ShPat[[sh]]
     if (length(S_h) == 0) next
     
     theta_u  <- par[1]
     theta_vh <- par[1 + h]
-    pzh <- S_h[[1]]$pzh
     
+    # These don't depend on pattern (only site h)
+    pzh <- S_h[[1]]$pzh
     V0 <- diag(c(theta_u, rep(theta_vh, pzh - 1)), pzh)
     V0_inv <- diag(1/diag(V0), pzh, pzh)
     Theta_h_inv <- as.matrix(bdiag(replicate(R, V0_inv, simplify = FALSE)))
     logdet_Theta_h <- R * as.numeric(determinant(V0, logarithm = TRUE)$modulus)
     
-    ## ---- Aggregates in FULL (R-augmented) space ----
-    SxxR_sum <- matrix(0, R * px, R * px)      # sum of kronecker(Rinve_embed, ShX)
-    Sxz_sum  <- matrix(0, R * px, R * pzh)     # sum of kronecker(Rinve_embed, ShXZ)
-    Szz_sum  <- matrix(0, R * pzh, R * pzh)    # sum of kronecker(Rinve_embed, ShZ)
+    # Per-site sums in FULL R-embedded space
+    SxxR_sum <- matrix(0, R*px,  R*px)
+    Sxz_sum  <- matrix(0, R*px,  R*pzh)
+    Szz_sum  <- matrix(0, R*pzh, R*pzh)
+    sxy_sum  <- rep(0, R*px)
+    szy_sum  <- rep(0, R*pzh)
+    ytildeY_sum      <- 0
+    logdet_Rcorr_sum <- 0
+    Nh_site          <- 0
     
-    sxy_sum  <- rep(0, R * px)                 # vec of stacked columns across outcomes
-    szy_sum  <- rep(0, R * pzh)                # vec similarly for ZY
-    
-    ytildeY_sum       <- 0
-    logdet_Rcorr_sum  <- 0
-    Nh_site           <- 0
-    
-    keys <- names(S_h)
-    for (key in keys) {
-      S   <- S_h[[key]]
-      s   <- S$s
-      Nh  <- S$Nh
-      Nh_site <- Nh_site + Nh
+    for (key in names(S_h)) {
+      S <- S_h[[key]]
+      o <- S$idx_outcomes
+      s <- S$s
+      Nh_site <- Nh_site + S$Nh
       
-      rc_s <- .Rcorr_inv_and_logdet_s(s, rho)
+      # inverse + logdet for the pattern's observed sub-corr
+      if (corstr == "exchangeable") {
+        rc_s <- .Rcorr_inv_and_logdet_s(s, if (isTRUE(estimate_rho)) rho else rho_fixed)
+      } else if (corstr == "independence") {
+        rc_s <- list(Rinve = diag(s), logdet_Rcorr = 0)
+      } else {
+        rc_s <- .Corr_subset_inv_logdet(Corr, o)
+      }
       Rinve_s <- rc_s$Rinve
-      logdet_Rcorr_sum <- logdet_Rcorr_sum + Nh * rc_s$logdet_Rcorr
+      logdet_Rcorr_sum <- logdet_Rcorr_sum + S$Nh * rc_s$logdet_Rcorr
       
+      # embed to R x R via E_pi
       Epi <- selector_from_key(key, R)
-      Rinve_embed <- Epi %*% Rinve_s %*% t(Epi)  # R x R
+      Rinve_embed <- Epi %*% Rinve_s %*% t(Epi)
       
-      ## Whitened/embedded cross-products (pattern -> full R)
-      SxxR_sum <- SxxR_sum + kronecker(Rinve_embed, S$ShX)    # (R*px) x (R*px)
-      Sxz_sum  <- Sxz_sum  + kronecker(Rinve_embed, S$ShXZ)   # (R*px) x (R*pzh)
-      Szz_sum  <- Szz_sum  + kronecker(Rinve_embed, S$ShZ)    # (R*pzh) x (R*pzh)
+      # contributions (pattern -> full R)
+      SxxR_sum <- SxxR_sum + kronecker(Rinve_embed, S$ShX)
+      Sxz_sum  <- Sxz_sum  + kronecker(Rinve_embed, S$ShXZ)
+      Szz_sum  <- Szz_sum  + kronecker(Rinve_embed, S$ShZ)
       
-      ## XY, ZY: build full-R matrices then vec
-      idx <- key_to_idx(key)
+      # XY, ZY: build full-R then vec (prewhiten with Rinve_s on columns o)
       ShXY_full <- matrix(0, nrow = nrow(S$ShXY), ncol = R)
       ShZY_full <- matrix(0, nrow = nrow(S$ShZY), ncol = R)
-      ShXY_full[, idx] <- S$ShXY %*% Rinve_s
-      ShZY_full[, idx] <- S$ShZY %*% Rinve_s
+      ShXY_full[, o] <- S$ShXY %*% Rinve_s
+      ShZY_full[, o] <- S$ShZY %*% Rinve_s
+      sxy_sum <- sxy_sum + as.vector(ShXY_full)
+      szy_sum <- szy_sum + as.vector(ShZY_full)
       
-      sxy_sum <- sxy_sum + as.vector(ShXY_full)  # length R*px
-      szy_sum <- szy_sum + as.vector(ShZY_full)  # length R*pzh
-      
-      ## y~'y~
+      # y~'y~ = tr(Rinve_s * Y_o'Y_o)
       ytildeY_sum <- ytildeY_sum + sum(Rinve_s * S$ShYY)
     }
     
-    ## Single per-site Woodbury
+    # Woodbury at the site level
     A_h <- Theta_h_inv + Szz_sum
     
-    ## log|Gamma_h|: sum log|R_{s}| (by pattern) + log|Theta_h| (once) + log|A_h|
     lpterm1 <- lpterm1 + logdet_Rcorr_sum + logdet_Theta_h +
       as.numeric(determinant(A_h, logarithm = TRUE)$modulus)
     
-    ## Reductions
-    Ainv_SxzT <- solve(A_h, t(Sxz_sum))                     # (R*pzh) x (R*px)
-    bterm1    <- bterm1 + (SxxR_sum - Sxz_sum %*% Ainv_SxzT)
+    Ainv_StXZt <- solve(A_h, t(Sxz_sum))
+    bterm1 <- bterm1 + (SxxR_sum - Sxz_sum %*% Ainv_StXZt)
     
-    Ainv_szy  <- solve(A_h, szy_sum)                        # (R*pzh) x 1
-    bterm2    <- bterm2 + (sxy_sum - as.vector(Sxz_sum %*% Ainv_szy))
+    Ainv_szy <- solve(A_h, szy_sum)
+    bterm2 <- bterm2 + (sxy_sum - as.vector(Sxz_sum %*% Ainv_szy))
     
-    lpterm2   <- lpterm2 + (ytildeY_sum - drop(t(szy_sum) %*% Ainv_szy))
-    Nsum      <- Nsum + Nh_site
+    lpterm2 <- lpterm2 + (ytildeY_sum - drop(t(szy_sum) %*% Ainv_szy))
+    Nsum    <- Nsum + Nh_site
   }
   
-  
-  # Solve for beta and compute qterm
+  # beta, qterm, sigma2 profiling
   L <- chol(bterm1 + 1e-6 * diag(nrow(bterm1)))
   beta_hat <- backsolve(L, forwardsolve(t(L), bterm2))
   qterm <- as.numeric(lpterm2 - 2 * sum(bterm2 * beta_hat) + t(beta_hat) %*% bterm1 %*% beta_hat)
@@ -283,23 +324,24 @@ lmm.profile3_mv_patterns <- function(par, ShPat,
   }
   
   list(
-    lp = lp, b = beta_hat, s2 = s2, rho = if (estimate_rho) rho else 0,
+    lp = lp, b = beta_hat, s2 = s2,
+    rho = if (corstr == "exchangeable") (if (estimate_rho) rho else rho_fixed) else NA_real_,
+    Corr = if (corstr == "unstructured") Corr else NULL,
     allterms = list(bterm1 = bterm1, bterm2 = bterm2, qterm = qterm,
                     lpterm1 = lpterm1, lpterm2 = lpterm2, remlterm = remlterm)
   )
 }
 
 
-
 peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
                                     site_col = "site", patient_col = "patient",
                                     weights = NULL, reml = TRUE,
-                                    corstr = c("exchangeable","independence"),
+                                    corstr = c("exchangeable","independence","unstructured"),
                                     mypar.init = NULL, rho_init = 0.1,
                                     hessian = TRUE, verbose = TRUE) {
   
   corstr <- match.arg(corstr)
-  R <- length(Y_cols)
+  R <- length(Y_cols); q <- if (corstr == "unstructured") R*(R-1)/2 else 0
   
   # one-shot summaries
   ShPat <- peal.get.summary_mv_patterns(data, X_cols, Y_cols,
@@ -307,39 +349,36 @@ peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
                                         weights = weights)
   sites <- names(ShPat); K <- length(sites)
   pz <- K + 1
-  px <- attr(ShPat, "px")
   
   # init params
   if (is.null(mypar.init)) {
     mypar.init <- rep(1, pz)  # theta_u + theta_v[h]
     if (corstr == "exchangeable") mypar.init <- c(mypar.init, rho_init)
+    if (corstr == "unstructured") mypar.init <- c(mypar.init, rep(0, q))  # near I
     if (verbose) cat("Default mypar.init =", mypar.init, "\n")
-  } else {
-    if (corstr == "exchangeable" && length(mypar.init) == pz)
-      mypar.init <- c(mypar.init, rho_init)
+  } else if (length(mypar.init) == pz) {
+    if (corstr == "exchangeable") mypar.init <- c(mypar.init, rho_init)
+    if (corstr == "unstructured") mypar.init <- c(mypar.init, rep(0, q))
   }
   
   # objective
   fn <- function(parameter) {
-    if (corstr == "independence") {
-      -lmm.profile3_mv_patterns(parameter[1:pz], ShPat,
-                                reml = reml, estimate_rho = FALSE, rho_fixed = 0,
-                                verbose = FALSE)$lp
-    } else {
-      -lmm.profile3_mv_patterns(parameter, ShPat,
-                                reml = reml, estimate_rho = TRUE,
-                                verbose = FALSE)$lp
-    }
+    -lmm.profile3_mv_patterns(parameter, ShPat,
+                              reml = reml, corstr = corstr,
+                              estimate_rho = (corstr != "independence"),
+                              rho_fixed = if (corstr == "exchangeable") 0 else 0,
+                              verbose = FALSE)$lp
   }
   
   # bounds
-  lower <- rep(1e-5, length(mypar.init))
-  upper <- rep(Inf,  length(mypar.init))
+  lower <- rep(1e-5, pz); upper <- rep(Inf, pz)
   if (corstr == "exchangeable") {
-    # Use s=R for bounds reference; true check is handled inside .Rcorr_inv_and_logdet_s
     rc <- .Rcorr_inv_and_logdet(R, rho = 0)
-    lower[length(lower)] <- rc$lower + 1e-8
-    upper[length(upper)] <- rc$upper - 1e-8
+    lower <- c(lower, rc$lower + 1e-8)
+    upper <- c(upper, rc$upper - 1e-8)
+  } else if (corstr == "unstructured") {
+    lower <- c(lower, rep(-Inf, q))
+    upper <- c(upper, rep( Inf, q))
   }
   
   res <- optim(mypar.init, fn, method = "L-BFGS-B",
@@ -350,19 +389,11 @@ peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
                    ifelse(all(eigen(res$hessian)$value > 0), "Hessian PD", "Hessian not PD"), "\n",
                    "Function evaluations:", res$counts[1], "\n")
   
-  # recompute at optimum
-  if (corstr == "independence") {
-    prof <- lmm.profile3_mv_patterns(res$par[1:pz], ShPat,
-                                     reml = reml, estimate_rho = FALSE, rho_fixed = 0)
-    rho_hat <- 0
-  } else {
-    prof <- lmm.profile3_mv_patterns(res$par, ShPat,
-                                     reml = reml, estimate_rho = TRUE)
-    rho_hat <- prof$rho
-  }
+  prof <- lmm.profile3_mv_patterns(res$par, ShPat,
+                                   reml = reml, corstr = corstr,
+                                   estimate_rho = (corstr != "independence"))
   
   s2 <- prof$s2
-  # Var(vec(beta)) = s2 * (bterm1)^{-1}; use Cholesky for stability
   B1 <- prof$allterms$bterm1
   Vbeta <- chol2inv(chol(B1)) * s2
   se    <- sqrt(diag(Vbeta))
@@ -370,15 +401,19 @@ peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
   lb    <- prof$b - 1.96 * se
   ub    <- prof$b + 1.96 * se
   
-  Rcorr <- (1 - rho_hat) * diag(R) + rho_hat * matrix(1, R, R)
-  Sigma_e <- s2 * Rcorr
+  Corr_hat <- if (corstr == "unstructured") prof$Corr else
+    if (corstr == "exchangeable") ((1 - prof$rho) * diag(R) + prof$rho * matrix(1, R, R)) else diag(R)
+  Sigma_e <- s2 * Corr_hat
   
   list(
     b = prof$b, b.sd = se, wald = wald, lb = lb, ub = ub,
-    theta = res$par[1:pz], rho = rho_hat, Sigma_e = Sigma_e,
-    s2 = s2, opt = res, res.profile = prof
+    theta = res$par[1:pz],
+    rho = if (corstr == "exchangeable") prof$rho else NULL,
+    Corr = Corr_hat, Sigma_e = Sigma_e,
+    s2 = s2, opt = res, res.profile = prof, ShPat = ShPat, corstr = corstr
   )
 }
+
 
 
 
@@ -402,35 +437,43 @@ peal.fit.RI_mv_patterns <- function(data, X_cols, Y_cols,
 # par = (theta_u, theta_v_1, ..., theta_v_K[, rho])
 lmm.profile3_mv_full <- function(par, ShFull,
                                  reml = TRUE,
+                                 corstr = c("exchangeable","independence","unstructured"),
                                  estimate_rho = TRUE, rho_fixed = 0,
                                  verbose = FALSE) {
+  corstr <- match.arg(corstr)
   R  <- attr(ShFull, "R")
   px <- attr(ShFull, "px")
   sites <- names(ShFull); K <- length(sites)
   pz <- K + 1
+  q  <- if (corstr == "unstructured") R*(R-1)/2 else 0
   
-  if (estimate_rho) {
-    stopifnot(length(par) == pz + 1)
-    rho <- par[pz + 1]
+  # parse correlation
+  if (corstr == "independence") {
+    stopifnot(length(par) == pz); Corr <- diag(R); rho <- 0
+  } else if (corstr == "exchangeable") {
+    if (estimate_rho) { stopifnot(length(par) == pz + 1); rho <- par[pz + 1] }
+    else              { stopifnot(length(par) == pz);      rho <- rho_fixed }
+    Corr <- (1 - rho) * diag(R) + rho * matrix(1, R, R)
   } else {
-    stopifnot(length(par) == pz)
-    rho <- rho_fixed
+    stopifnot(estimate_rho, length(par) == pz + q)
+    par_corr <- par[(pz + 1):(pz + q)]
+    Corr <- .Corr_from_cholfree(R, par_corr)$Corr
+    rho <- NA_real_
   }
   
-  rc <- .Rcorr_inv_and_logdet(R, rho)
-  Rinve <- rc$Rinve
-  logdet_Rcorr <- rc$logdet_Rcorr
+  # common inverse/logdet for FULL Corr (used R-wise on ShX/Z)
+  Cj <- Corr + diag(1e-8, R)
+  U  <- chol(Cj)
+  Rinve <- chol2inv(U)
+  logdet_Rcorr <- 2 * sum(log(diag(U)))
   
-  lpterm1 <- 0
-  lpterm2 <- 0
-  remlterm <- 0
+  lpterm1 <- 0; lpterm2 <- 0; remlterm <- 0
   bterm1 <- matrix(0, R * px, R * px)
   bterm2 <- rep(0, R * px)
   Nsum <- 0
   
   for (h in seq_len(K)) {
-    sh <- sites[h]
-    S  <- ShFull[[sh]]
+    sh <- sites[h]; S <- ShFull[[sh]]
     if (is.null(S)) next
     
     theta_u  <- par[1]
@@ -442,7 +485,6 @@ lmm.profile3_mv_full <- function(par, ShFull,
     Theta_h_inv <- as.matrix(bdiag(replicate(R, V0_inv, simplify = FALSE)))
     logdet_Theta_h <- R * as.numeric(determinant(V0, logarithm = TRUE)$modulus)
     
-    # whitened cross-products (full R)
     ShX_tilde  <- kronecker(Rinve, S$ShX)
     ShXZ_tilde <- kronecker(Rinve, S$ShXZ)
     ShZ_tilde  <- kronecker(Rinve, S$ShZ)
@@ -463,7 +505,6 @@ lmm.profile3_mv_full <- function(par, ShFull,
     bterm2 <- bterm2 + (ShXY_tilde_vec - as.vector(ShXZ_tilde %*% Ainv_StZY))
     
     lpterm2 <- lpterm2 + (YtildeY - drop(t(ShZY_tilde_vec) %*% Ainv_StZY))
-    
     Nsum <- Nsum + S$Nh
   }
   
@@ -483,48 +524,54 @@ lmm.profile3_mv_full <- function(par, ShFull,
     lp <- -(lpterm1 + (1 + log(qterm * 2 * pi / NtotR)) * NtotR) / 2
   }
   
-  list(lp = lp, b = beta_hat, s2 = s2, rho = if (estimate_rho) rho else 0,
+  list(lp = lp, b = beta_hat, s2 = s2,
+       rho = if (corstr == "exchangeable") (if (estimate_rho) rho else rho_fixed) else NA_real_,
+       Corr = if (corstr == "unstructured") Corr else NULL,
        allterms = list(bterm1 = bterm1, bterm2 = bterm2, qterm = qterm,
                        lpterm1 = lpterm1, lpterm2 = lpterm2, remlterm = remlterm))
 }
 
-# Top-level M-step fit on full summaries (optimize theta and rho)
 peal.fit.RI_mv_full_from_EMsumm <- function(ShFull, reml = TRUE,
+                                            corstr = c("exchangeable","independence","unstructured"),
                                             estimate_rho = TRUE, rho_init = 0.1,
                                             mypar.init = NULL, hessian = TRUE, verbose = TRUE) {
+  corstr <- match.arg(corstr)
   R  <- attr(ShFull, "R")
   sites <- names(ShFull); K <- length(sites)
   pz <- K + 1
+  q  <- if (corstr == "unstructured") R*(R-1)/2 else 0
   
   if (is.null(mypar.init)) {
     mypar.init <- rep(1, pz)
-    if (estimate_rho) mypar.init <- c(mypar.init, rho_init)
-  } else if (estimate_rho && length(mypar.init) == pz) {
-    mypar.init <- c(mypar.init, rho_init)
+    if (corstr == "exchangeable" && estimate_rho) mypar.init <- c(mypar.init, rho_init)
+    if (corstr == "unstructured") mypar.init <- c(mypar.init, rep(0, q))
+  } else if (length(mypar.init) == pz) {
+    if (corstr == "exchangeable" && estimate_rho) mypar.init <- c(mypar.init, rho_init)
+    if (corstr == "unstructured") mypar.init <- c(mypar.init, rep(0, q))
   }
   
   fn <- function(parameter) {
-    if (estimate_rho) {
-      -lmm.profile3_mv_full(parameter, ShFull, reml = reml, estimate_rho = TRUE)$lp
-    } else {
-      -lmm.profile3_mv_full(parameter[1:pz], ShFull, reml = reml,
-                            estimate_rho = FALSE, rho_fixed = 0)$lp
-    }
+    -lmm.profile3_mv_full(parameter, ShFull, reml = reml,
+                          corstr = corstr,
+                          estimate_rho = (corstr != "independence"),
+                          rho_fixed = if (corstr == "exchangeable") 0 else 0)$lp
   }
   
-  lower <- rep(1e-5, length(mypar.init)); upper <- rep(Inf, length(mypar.init))
-  if (estimate_rho) {
+  lower <- rep(1e-5, pz); upper <- rep(Inf, pz)
+  if (corstr == "exchangeable") {
     rc <- .Rcorr_inv_and_logdet(R, rho = 0)
-    lower[length(lower)] <- rc$lower + 1e-8
-    upper[length(upper)] <- rc$upper - 1e-8
+    lower <- c(lower, rc$lower + 1e-8)
+    upper <- c(upper, rc$upper - 1e-8)
+  } else if (corstr == "unstructured") {
+    lower <- c(lower, rep(-Inf, q))
+    upper <- c(upper, rep( Inf, q))
   }
   
-  res <- optim(mypar.init, fn, method = "L-BFGS-B", hessian = hessian, lower = lower, upper = upper)
-  prof <- if (estimate_rho) {
-    lmm.profile3_mv_full(res$par, ShFull, reml = reml, estimate_rho = TRUE)
-  } else {
-    lmm.profile3_mv_full(res$par[1:pz], ShFull, reml = reml, estimate_rho = FALSE, rho_fixed = 0)
-  }
+  res <- optim(mypar.init, fn, method = "L-BFGS-B",
+               hessian = hessian, lower = lower, upper = upper)
+  
+  prof <- lmm.profile3_mv_full(res$par, ShFull, reml = reml,
+                               corstr = corstr, estimate_rho = (corstr != "independence"))
   
   s2 <- prof$s2
   B1 <- prof$allterms$bterm1
@@ -534,59 +581,36 @@ peal.fit.RI_mv_full_from_EMsumm <- function(ShFull, reml = TRUE,
   lb    <- prof$b - 1.96 * se
   ub    <- prof$b + 1.96 * se
   
-  rho_hat <- prof$rho
-  Rcorr <- (1 - rho_hat) * diag(R) + rho_hat * matrix(1, R, R)
-  Sigma_e <- s2 * Rcorr
+  Corr_hat <- if (corstr == "unstructured") prof$Corr else
+    if (corstr == "exchangeable") ((1 - prof$rho) * diag(R) + prof$rho * matrix(1, R, R)) else diag(R)
+  Sigma_e <- s2 * Corr_hat
   
   list(b = prof$b, b.sd = se, wald = wald, lb = lb, ub = ub,
-       theta = res$par[1:pz], rho = rho_hat, Sigma_e = Sigma_e,
+       theta = res$par[1:pz],
+       rho = if (corstr == "exchangeable") prof$rho else NULL,
+       Corr = Corr_hat, Sigma_e = Sigma_e,
        s2 = s2, opt = res, res.profile = prof)
 }
 
 
 
-
-# ---- NEW: One-shot E-step completed summaries from pattern summaries only ----
-# Inputs:
-#   ShPat : nested list from peal.get.summary_mv_patterns(...)
-#   beta_hat: length R*px vector, stacked by outcomes (same as prof$b)
-#   s2_hat, rho_hat: scalars
-# Output:
-#   ShFull : per-site full-R summaries {ShX, ShXZ, ShZ, ShXY, ShZY, ShYY, Nh, pzh}
-# ---- One-shot E-step: complete per-site full-R summaries from pattern summaries ----
-# Inputs:
-#   ShPat    : nested pattern summaries from peal.get.summary_mv_patterns(...)
-#              Each ShPat[[site]][[key]] has:
-#                ShX (p x p), ShXZ (p x p_z), ShZ (p_z x p_z),
-#                ShXY (p x s), ShZY (p_z x s), ShYY (s x s),
-#                Nh (int), pzh (int), idx_outcomes (length-s)
-#   beta_hat : length R*px vector of fixed-effect coeffs, stacked by outcomes
-#   s2_hat   : scalar residual scale
-#   rho_hat  : scalar exchangeable correlation (0 if independence)
-# Output:
-#   ShFull[[site]]: list with full-R blocks
-#       ShX (p x p), ShXZ (p x p_z), ShZ (p_z x p_z),
-#       ShXY (p x R), ShZY (p_z x R), ShYY (R x R),
-#       Nh (int), pzh (int)
-peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat, rho_hat, ridge = 1e-10) {
+peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat,
+                                        Corr_hat = NULL, rho_hat = NULL, ridge = 1e-10) {
   R  <- attr(ShPat, "R");  if (is.null(R)) stop("ShPat missing attr R")
   px <- attr(ShPat, "px"); if (is.null(px)) stop("ShPat missing attr px")
   sites <- names(ShPat)
-  
-  # reshape beta to p x R
   B <- matrix(beta_hat, nrow = px, ncol = R)
   
-  # residual covariance Sigma = s2 * [(1-rho)I + rho 11^T]
-  Rcorr <- (1 - rho_hat) * diag(R) + rho_hat * matrix(1, R, R)
-  Sigma <- s2_hat * Rcorr
+  # Accept either Corr_hat or rho_hat for backward compatibility
+  if (is.null(Corr_hat)) {
+    if (is.null(rho_hat)) stop("Provide Corr_hat (preferred) or rho_hat.")
+    Corr_hat <- (1 - rho_hat) * diag(R) + rho_hat * matrix(1, R, R)
+  }
+  Sigma <- s2_hat * Corr_hat
   
   safe_solve <- function(A, b = NULL, add = ridge) {
-    # numerically stable solve with tiny ridge
-    if (is.null(b)) {
-      return(solve(A + add * diag(nrow(A))))
-    } else {
-      return(solve(A + add * diag(nrow(A)), b))
-    }
+    if (is.null(b)) solve(A + add * diag(nrow(A)))
+    else            solve(A + add * diag(nrow(A)), b)
   }
   
   ShFull <- vector("list", length = length(sites)); names(ShFull) <- sites
@@ -595,11 +619,9 @@ peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat, rho_hat, ridge 
     S_h <- ShPat[[sh]]
     if (length(S_h) == 0L) { ShFull[[sh]] <- NULL; next }
     
-    # site-level accumulators
     ShX  <- matrix(0, px, px)
     ShXZ <- NULL; pzh <- NULL
     ShZ  <- NULL
-    
     ShXY_full <- matrix(0, px, R)
     ShZY_full <- NULL
     ShYY_full <- matrix(0, R, R)
@@ -607,81 +629,57 @@ peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat, rho_hat, ridge 
     
     for (key in names(S_h)) {
       S <- S_h[[key]]
-      o <- S$idx_outcomes           # observed outcome indices
-      s <- length(o)
+      o <- S$idx_outcomes; s <- length(o)
       m <- setdiff(seq_len(R), o)
-      
       Nh_site <- Nh_site + S$Nh
       if (is.null(ShXZ)) { ShXZ <- matrix(0, px,  S$pzh); pzh <- S$pzh }
       if (is.null(ShZ))  { ShZ  <- matrix(0, S$pzh, S$pzh) }
       if (is.null(ShZY_full)) ShZY_full <- matrix(0, pzh, R)
       
-      # pattern-agnostic accumulators
       ShX  <- ShX  + S$ShX
       ShXZ <- ShXZ + S$ShXZ
       ShZ  <- ShZ  + S$ShZ
       
-      # observed blocks for this pattern
-      XYo  <- S$ShXY                 # p x |o|
-      ZYo  <- S$ShZY                 # pz x |o|
-      YYoo <- S$ShYY                 # |o| x |o|
-      B_o  <- B[, o, drop = FALSE]   # p x |o|
+      XYo  <- S$ShXY
+      ZYo  <- S$ShZY
+      YYoo <- S$ShYY
+      B_o  <- B[, o, drop = FALSE]
       
-      # model projections
-      XEo <- S$ShX  %*% B_o                  # X' eta_o
-      ZEo <- t(S$ShXZ) %*% B_o               # Z' eta_o  (note the transpose!)
+      XEo <- S$ShX  %*% B_o
+      ZEo <- t(S$ShXZ) %*% B_o
       
-      # residual projections wrt X, Z
-      Xres_o <- XYo - XEo                    # X'(y_o - eta_o)
-      Zres_o <- ZYo - ZEo                    # Z'(y_o - eta_o)
+      Xres_o <- XYo - XEo
+      Zres_o <- ZYo - ZEo
       
-      # add observed contributions directly
       ShXY_full[, o] <- ShXY_full[, o] + XYo
       ShZY_full[, o] <- ShZY_full[, o] + ZYo
       ShYY_full[o, o] <- ShYY_full[o, o] + YYoo
-      
-      # if nothing missing for this pattern, continue
       if (length(m) == 0L) next
       
-      # partitions of Sigma and conditional weights
+      # conditional components from general Sigma
       Soo <- Sigma[o, o, drop = FALSE]
       Som <- Sigma[o, m, drop = FALSE]
       Smm <- Sigma[m, m, drop = FALSE]
       Sooinv <- safe_solve(Soo)
-      W <- Sooinv %*% Som                 # |o| x |m|
+      W <- Sooinv %*% Som
       
-      # model projections for the missing block
-      B_m  <- B[, m, drop = FALSE]        # p x |m|
-      XE_m <- S$ShX  %*% B_m              # X' eta_m
-      ZE_m <- t(S$ShXZ) %*% B_m           # Z' eta_m
+      B_m  <- B[, m, drop = FALSE]
+      XE_m <- S$ShX  %*% B_m
+      ZE_m <- t(S$ShXZ) %*% B_m
       
-      # Completed X'Y and Z'Y for missing columns: X'(E[y_m]) = X'eta_m + X'(y_o-eta_o) W
       ShXY_full[, m] <- ShXY_full[, m] + XE_m + Xres_o %*% W
       ShZY_full[, m] <- ShZY_full[, m] + ZE_m + Zres_o %*% W
       
-      # Cross block o-m of Y'Y:
-      # sum y_o E[y_m]^T = (X'Y_o)^T B_m + (YYoo - (X'Y_o)^T B_o) W
       YoEta_m <- t(XYo) %*% B_m
-      YoResT  <- YYoo - t(XYo) %*% B_o          # sum y_o (y_o - eta_o)^T
+      YoResT  <- YYoo - t(XYo) %*% B_o
       ShYY_full[o, m] <- ShYY_full[o, m] + YoEta_m + YoResT %*% W
-      ShYY_full[m, o] <- t(ShYY_full[o, m])     # symmetry
+      ShYY_full[m, o] <- t(ShYY_full[o, m])
       
-      # m-m block of Y'Y:
-      # Var term: Nh * Var(y_m|y_o)
       Vm <- Smm - t(Som) %*% Sooinv %*% Som
-      
-      # sum eta_m eta_m^T = B_m^T (X'X) B_m
       Eta_mEta_mT <- t(B_m) %*% S$ShX %*% B_m
-      
-      # sum r_o r_o^T with r_o = y_o - eta_o:
-      # = YYoo - (X'Y_o)^T B_o - B_o^T (X'Y_o) + B_o^T (X'X) B_o
       Res_oRes_oT <- YYoo - t(XYo) %*% B_o - t(B_o) %*% XYo + t(B_o) %*% S$ShX %*% B_o
-      
-      # propagation of residuals onto m via W:
       Prop_m <- t(W) %*% Res_oRes_oT %*% W
-      
-      # cross terms: sum [eta_m r_o^T W + W^T r_o eta_m^T]
-      Cross <- t(B_m) %*% Xres_o %*% W + t(W) %*% t(Xres_o) %*% B_m
+      Cross  <- t(B_m) %*% Xres_o %*% W + t(W) %*% t(Xres_o) %*% B_m
       
       ShYY_full[m, m] <- ShYY_full[m, m] +
         S$Nh * Vm + Eta_mEta_mT + Prop_m + Cross
@@ -701,59 +699,55 @@ peal.complete_from_patterns <- function(ShPat, beta_hat, s2_hat, rho_hat, ridge 
 
 
 # EM driver:
-#   - Initialize with your pattern-aware fit (M0).
-#   - E-step: complete per-site full-R summaries using current params.
-#   - M-step: refit using full-R summaries (no patterns).
-# Repeat em_iter times (usually 1–2 is enough).
-# ---- REPLACE the EM loop body in peal.em.fit.RI_mv() ----
 peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
                               site_col = "site", patient_col = "patient",
                               weights = NULL, reml = TRUE,
-                              corstr_init = c("exchangeable","independence"),
+                              corstr_init = c("exchangeable","independence","unstructured"),
                               rho_init = 0.1, mypar.init = NULL,
                               em_iter = 1, verbose = TRUE) {
   
   corstr_init <- match.arg(corstr_init)
   R <- length(Y_cols)
-  estimate_rho_all <- (corstr_init == "exchangeable")
+  estimate_corr <- (corstr_init != "independence")
   
-  # ----- One-shot collection (sites send exactly once) -----
+  # One-shot collection (sites send exactly once)
   ShPat <- peal.get.summary_mv_patterns(
     data, X_cols, Y_cols,
     site_col = site_col, patient_col = patient_col, weights = weights
   )
   
-  # ----- Initial pattern-aware fit (M0) -----
+  # Initial pattern-aware fit (M0)
   init_fit <- peal.fit.RI_mv_patterns(
     data, X_cols, Y_cols,
     site_col = site_col, patient_col = patient_col, weights = weights,
     reml = reml, corstr = corstr_init,
     mypar.init = mypar.init,
-    rho_init = if (estimate_rho_all) rho_init else 0,
+    rho_init = if (corstr_init == "exchangeable") rho_init else 0,
     hessian = TRUE, verbose = verbose
   )
   
   hist <- list(init = init_fit)
   cur  <- init_fit
   
-  # ----- Exactly one EM iteration at the lead (default em_iter = 1) -----
   for (it in seq_len(em_iter)) {
     if (verbose) cat(sprintf("\n[EM] Iteration %d (one-shot, no new site stats)\n", it))
     
-    # E-step (lead only): complete full-R summaries from *pattern* summaries
+    # E-step (lead): complete full-R summaries from pattern summaries
     ShFull <- peal.complete_from_patterns(
       ShPat,
       beta_hat = cur$b,
       s2_hat   = cur$s2,
-      rho_hat  = if (estimate_rho_all) cur$rho else 0
+      Corr_hat = cur$Corr,           # <-- use full Corr if available
+      rho_hat  = cur$rho             # fallback for exchangeable
     )
     
-    # M-step on completed full summaries (optimize theta and optionally rho)
+    # M-step: optimize theta and correlation params on completed summaries
     mfit <- peal.fit.RI_mv_full_from_EMsumm(
       ShFull, reml = reml,
-      estimate_rho = estimate_rho_all,
-      rho_init     = if (estimate_rho_all) cur$rho else 0,
-      mypar.init   = c(cur$theta),   # <-- takes θ from first step into account
+      corstr = corstr_init,
+      estimate_rho = estimate_corr,
+      rho_init     = if (!is.null(cur$rho)) cur$rho else 0,
+      mypar.init   = c(cur$theta),   # use θ from first step (your request)
       hessian = TRUE, verbose = verbose
     )
     
@@ -761,11 +755,11 @@ peal.em.fit.RI_mv <- function(data, X_cols, Y_cols,
     cur <- mfit
   }
   
-  # housekeeping and reporting
+  # report θ from pre-EM initializer; keep EM-updated θ separately
   cur$history <- hist
   cur$em_iter <- em_iter
-  cur$theta_em <- cur$theta             # keep the EM-updated θ for reference
-  cur$theta    <- hist$init$theta       # <-- report θ from pre-EM initializer (as you asked)
+  cur$theta_em <- cur$theta
+  cur$theta    <- hist$init$theta
   class(cur) <- c("mvpeal_em_fit", class(cur))
-  return(cur)
+  cur
 }

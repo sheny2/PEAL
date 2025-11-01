@@ -534,7 +534,10 @@ ggplot(sigma_summary, aes(x = Parameter, y = Bias, fill = Model)) +
 
 
 
-ggplot(beta_summary %>% mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), aes(x = Parameter, y = Variance, fill = Model)) +
+ggplot(beta_summary %>% 
+         # filter(Model %in% model_names[7:10]) %>% 
+         mutate(Parameter = factor(Parameter, levels = paste0("Beta", 1:(px*py)))), 
+       aes(x = Parameter, y = Variance, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   theme_minimal(base_size = 13) +

@@ -32,15 +32,36 @@ py <- 3 # Number of outcomes (multivariate)
 beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 0.5  # Site-level variance
-# sigma_v_hosp <- runif(H, min = 0.3, max = 1)  # Varying sigma_v by hospital
-sigma_v_hosp <- seq(0.4, 1,length.out = H)
+sigma_u <- 0.3  # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.4, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
-sigma_e <- 0.5  # Error variance
-rho <- 0.5 # Correlation between outcomes
-rho_mat <- matrix(rho, nrow = py, ncol = py)  # Exchangeable correlation matrix
-diag(rho_mat) <- 1  # Diagonal elements are 1
+# --- Set pairwise correlations between outcomes (py = 3 here) ---
+rho12 <- 0.40   # corr(Y1, Y2)
+rho13 <- 0.20   # corr(Y1, Y3)
+rho23 <- 0.60   # corr(Y2, Y3)
+
+# Build 3x3 correlation matrix
+corr_mat <- matrix(c(
+  1,     rho12, rho13,
+  rho12, 1,     rho23,
+  rho13, rho23, 1
+), nrow = py, ncol = py, byrow = TRUE)
+
+# Ensure it's a valid correlation matrix (SPD with unit diagonal)
+if (min(eigen(corr_mat, symmetric = TRUE, only.values = TRUE)$values) <= 0) {
+  corr_mat <- as.matrix(nearPD(corr_mat, corr = TRUE)$mat)
+}
+
+# same residual SD for all outcomes, keep a scalar sigma_e:
+sigma_e <- 0.5
+sigma_e_vec <- rep(sigma_e, py)
+
+# (Optional) If want outcome-specific residual SDs instead, set them here:
+# sigma_e_vec <- c(0.4, 0.5, 0.35)  # example per-outcome SDs for Y1, Y2, Y3
+
+De <- diag(sigma_e_vec, py)
+Sigma_e <- De %*% corr_mat %*% De
 
 
 # Generate data
@@ -70,9 +91,9 @@ X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(
 X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
 X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
 
-# Generate multivariate errors with exchangeable correlation
-epsilon_hij <- MASS::mvrnorm(sum(n_visits), mu = rep(0, py), 
-                       Sigma = diag(sigma_e, py) %*% rho_mat %*% diag(sigma_e, py))
+
+# --- Generate multivariate residuals with non-exchangeable correlation ---
+epsilon_hij <- mvrnorm(n = sum(n_visits), mu = rep(0, py), Sigma = Sigma_e)
 
 # Compute outcomes
 Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
@@ -81,7 +102,7 @@ for (k in 1:py) {
 }
 
 # Create data table
-three_lvl_dat <- data.table::data.table(
+three_lvl_dat <- data.table(
   site = id.hosp.expanded,
   patient = id.pat.expanded,
   visit = id.visit,
@@ -375,6 +396,20 @@ fit_missing_em_ind <- peal.em.fit.RI_mv(
 )
 ```
 
+
+```{r}
+source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
+fit_missing_em_unstr <- peal.em.fit.RI_mv(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "unstructured",
+  em_iter = 1, reml = TRUE, verbose = TRUE
+)
+```
+
+
+
 ```{r}
 cbind(
 "true" = c(beta) ,
@@ -387,14 +422,14 @@ cbind(
 "missing" = fit_mv_missing$b,
 "ind_missing" = fit_mv_ind_missing$b,
 "em_missing" = fit_missing_em$b,
-"ind_em_missing" = fit_missing_em_ind$b
+"ind_em_missing" = fit_missing_em_ind$b,
+"unstr_em_missing" = fit_missing_em_unstr$b
 )
 ```
 
 
 ```{r}
 cbind(
-"true" = c(rho) ,
 "full" = fit_mv_full$rho,
 "ind_full" = fit_mv_ind_full$rho,
 "missing_cc" = fit_mv_missing_cc$rho,
@@ -406,6 +441,9 @@ cbind(
 "em_missing" = fit_missing_em$rho,
 "ind_em_missing" = fit_missing_em_ind$rho
 )
+
+corr_mat
+fit_missing_em_unstr$Corr
 ```
 
 
@@ -421,10 +459,16 @@ cbind(
 "missing" = fit_mv_missing$s2 %>% sqrt(),
 "ind_missing" = fit_mv_ind_missing$s2 %>% sqrt(),
 "em_missing" = fit_missing_em$s2 %>% sqrt(),
-"ind_em_missing" = fit_missing_em_ind$s2 %>% sqrt()
+"ind_em_missing" = fit_missing_em_ind$s2 %>% sqrt(),
+"unstr_em_missing" = fit_missing_em_unstr$s2 %>% sqrt()
 )
 ```
 
+
+```{r}
+Sigma_e
+fit_missing_em_unstr$Sigma_e
+```
 
 ```{r}
 cbind(
@@ -438,7 +482,8 @@ cbind(
 "missing" = sqrt(fit_mv_missing$theta * fit_mv_missing$s2),
 "ind_missing" = sqrt(fit_mv_ind_missing$theta * fit_mv_ind_missing$s2),
 "em_missing" = sqrt(fit_missing_em$theta * fit_missing_em$history$init$s2),
-"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em_ind$history$init$s2)
+"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em_ind$history$init$s2),
+"unstr_em_missing" = sqrt(fit_missing_em_unstr$theta * fit_missing_em_unstr$history$init$s2)
 )
 ```
 
