@@ -1,5 +1,3 @@
-# MV-PEAL with missing outcomes, random intercepts only, exchangeable or unstructured residual correlation
-
 library(Matrix)
 
 # Encode which outcomes are observed on a row (length-R "01" string, e.g., "110")

@@ -11,16 +11,16 @@ source("PEAL_Engine_Multi-RI.R")
 # -------------------------
 # Parallel setup
 # -------------------------
-N <- 100
-num_cores <- detectCores() - 1
+N <- 20
+num_cores <- parallelly::availableCores() - 1
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
 
 # -------------------------
 # DGP Parameters
 # -------------------------
-H <- 5
-m_hosp <- sample(10:30, H, replace = TRUE)
+H <- 10
+m_hosp <- sample(30:50, H, replace = TRUE)
 px <- 6
 p_bin <- 3
 p_cont <- px - p_bin
@@ -30,14 +30,14 @@ py <- 3
 beta <- matrix(seq(-3, 3, length.out = px * py), nrow = px, ncol = py)
 
 # Variance components (SDs)
-sigma_u <- 0.3
-sigma_v_hosp <- c(0.61, 0.63, 0.65, 0.67, 0.69)
+sigma_u <- 1
+sigma_v_hosp <- runif(H, min = 0.5, max = 1)  # Varying sigma_v by hospital
 
 # sigma_u <- 0.3 * 10
 # sigma_v_hosp <- c(0.21, 0.23, 0.25, 0.27, 0.29) * 10
 
 # Residual SD and exchangeable correlation
-sigma_e <- 3
+sigma_e <- 0.5
 rho <- 0.5
 rho_mat <- matrix(rho, nrow = py, ncol = py); diag(rho_mat) <- 1
 
@@ -73,7 +73,7 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS")) %dopar% 
   nn <- rep(m_hosp, times = 1)
   id.hosp <- rep(1:H, times = m_hosp)
   id.pat <- sequence(nn)
-  n_visits <- sample(1:20, sum(nn), replace = TRUE)
+  n_visits <- sample(1:10, sum(nn), replace = TRUE)
   
   id.visit <- sequence(n_visits)
   id.hosp.expanded <- rep(id.hosp, times = n_visits)
@@ -200,6 +200,7 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS")) %dopar% 
        beta_indep  = out_indep$beta,
        sigma_indep = out_indep$sigma)
 }
+
 
 # -------------------------
 # Store into pre-allocated matrices

@@ -30,8 +30,8 @@ py <- 3 # Number of outcomes (multivariate)
 beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 0.3  # Site-level variance
-sigma_v_hosp <- runif(H, min = 0.4, max = 0.7)  # Varying sigma_v by hospital
+sigma_u <- 0.5  # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.5, max = 1)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 # --- Set pairwise correlations between outcomes (py = 3 here) ---
@@ -52,7 +52,7 @@ if (min(eigen(corr_mat, symmetric = TRUE, only.values = TRUE)$values) <= 0) {
 }
 
 # same residual SD for all outcomes, keep a scalar sigma_e:
-sigma_e <- 0.5
+sigma_e <- 0.3
 sigma_e_vec <- rep(sigma_e, py)
 
 # (Optional) If want outcome-specific residual SDs instead, set them here:
@@ -177,6 +177,7 @@ fit_mv <- peal.fit.RI_mv(
   estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
   verbose = TRUE
 )
+
 
 fit_mv_unstr <- peal.fit.RI_mv(
   Y = Y, X = X, Z = Z, id.site = id.site,

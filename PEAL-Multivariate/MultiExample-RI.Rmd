@@ -19,8 +19,8 @@ knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
 
 ```{r}
 # Parameters
-H <- 3  # Number of sites
-m_hosp <- sample(50:75, H, replace = TRUE)  # Number of patients per site
+H <- 20  # Number of sites
+m_hosp <- sample(10:20, H, replace = TRUE)  # Number of patients per site
 px <- 6  # Number of covariates
 p_bin <- 3  # Number of binary covariates
 p_cont <- px - p_bin  # Number of continuous covariates
@@ -44,7 +44,7 @@ diag(rho_mat) <- 1  # Diagonal elements are 1
 nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
 id.hosp <- rep(1:H, times = m_hosp)  # Hospital ID
 id.pat <- sequence(nn)  # Patient ID
-n_visits <- sample(1:20, sum(nn), replace = TRUE)  # Number of visits per patient
+n_visits <- sample(1:10, sum(nn), replace = TRUE)  # Number of visits per patient
 
 # Expand hospital and patient IDs for visits
 id.visit <- sequence(n_visits)

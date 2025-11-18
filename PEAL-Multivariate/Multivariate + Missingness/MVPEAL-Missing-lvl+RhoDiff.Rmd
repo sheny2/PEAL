@@ -32,12 +32,12 @@ py <- 3 # Number of outcomes (multivariate)
 beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
 
 # Variance components
-sigma_u <- 0.3  # Site-level variance
+sigma_u <- 0.5  # Site-level variance
 sigma_v_hosp <- runif(H, min = 0.4, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 # --- Set pairwise correlations between outcomes (py = 3 here) ---
-rho12 <- 0.40   # corr(Y1, Y2)
+rho12 <- 0.15   # corr(Y1, Y2)
 rho13 <- 0.20   # corr(Y1, Y3)
 rho23 <- 0.60   # corr(Y2, Y3)
 
@@ -54,7 +54,7 @@ if (min(eigen(corr_mat, symmetric = TRUE, only.values = TRUE)$values) <= 0) {
 }
 
 # same residual SD for all outcomes, keep a scalar sigma_e:
-sigma_e <- 0.5
+sigma_e <- 0.3
 sigma_e_vec <- rep(sigma_e, py)
 
 # (Optional) If want outcome-specific residual SDs instead, set them here:
@@ -120,9 +120,11 @@ visit_count <- three_lvl_dat %>%
 rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
   arrange(site, total_visits, patient) %>%
   mutate(site = factor(site))
+```
 
 
-# Introduce substantial missingness in Y_1 to Y_R
+```{r}
+# Option 1: Introduce substantial missingness in Y_1 to Y_R
 # rearranged_data_with_missing <- rearranged_data
 # for(y_col in paste0("Y", 1:py)) {
 #   missing_indices <- sample(1:nrow(rearranged_data), 
@@ -135,8 +137,11 @@ rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) 
 # rearranged_data_with_missing$Y1[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.2))] <- NA
 # rearranged_data_with_missing$Y2[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.3))] <- NA
 # rearranged_data_with_missing$Y3[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.6))] <- NA
+```
 
-# Option 3: MAR
+
+```{r}
+# Option 3: MAR, missingness depends on other outcomes
 rearranged_data_with_missing <- rearranged_data
 n <- nrow(rearranged_data)
 
@@ -146,10 +151,10 @@ p2_base <- 0.3   # baseline for Y2
 p3_base <- 0.5   # baseline for Y3
 
 # Step 2. For Y3: missingness depends on whether Y1 and Y2 are observed
-# If both Y1 and Y2 are observed → Y3 more likely missing
+# If both Y1 and Y2 are observed -> Y3 more likely missing
 Y3_miss_prob <- ifelse(!is.na(rearranged_data$Y1) & !is.na(rearranged_data$Y2), 
-                       p3_base + 0.25,  # boost missingness
-                       p3_base - 0.25)  # lower missingness
+                       p3_base + 0.2,  # boost missingness
+                       p3_base - 0.2)  # lower missingness
 Y3_miss_prob <- pmin(pmax(Y3_miss_prob, 0), 1)
 Y3_missing <- rbinom(n, 1, Y3_miss_prob) == 1
 rearranged_data_with_missing$Y3[Y3_missing] <- NA
@@ -171,7 +176,6 @@ Y2_missing <- rbinom(n, 1, Y2_miss_prob) == 1
 rearranged_data_with_missing$Y1[Y1_missing] <- NA
 rearranged_data_with_missing$Y2[Y2_missing] <- NA
 
-
 # Ensure no cases where all Ys are missing
 all_y_missing <- apply(rearranged_data_with_missing[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
 num_all_missing <- sum(all_y_missing)
@@ -189,7 +193,6 @@ if (num_all_missing > 0) {
 # Check the missingness pattern
 cat("Missingness summary:\n")
 print(sapply(rearranged_data_with_missing[paste0("Y", 1:py)], function(x) mean(is.na(x))))
-
 mice::md.pattern(rearranged_data_with_missing[,paste0("Y",1:py)])
 
 
@@ -203,21 +206,23 @@ cat("Complete cases:", sum(complete.cases(rearranged_data_with_missing)), "\n")
 cat("Percentage complete cases:", round(mean(complete.cases(rearranged_data_with_missing)) * 100, 2), "%\n")
 
 
-rearranged_data
-rearranged_data_with_missing
-rearranged_data_with_missing_cc <- cc(rearranged_data_with_missing)
+rearranged_data # full data
+rearranged_data_with_missing # missing/observed data
+rearranged_data_with_missing_cc <- cc(rearranged_data_with_missing) # complete-case data
 
+# Combine all site-specific imputed datasets
 sites <- unique(rearranged_data_with_missing$site)
 imputed_datasets <- list()
 
 for(site_id in sites) {
   site_data <- rearranged_data_with_missing[rearranged_data_with_missing$site == site_id, ]
-  imp_site <- mice::mice(site_data, m = 1)
+  imp_site <- mice(site_data, m = 5)
   imputed_datasets[[as.character(site_id)]] <- mice::complete(imp_site)
 }
+rearranged_data_with_missing_mice <- do.call(rbind, imputed_datasets) # site-level imputed data
 
-# Combine all site-specific imputed datasets
-rearranged_data_with_missing_mice <- do.call(rbind, imputed_datasets)
+# Alternatively, impute the entire dataset at once, but this is imputation at pooled level
+rearranged_data_with_missing_mice_full <- complete(mice(rearranged_data_with_missing, m = 5)) # full-data imputed data
 ```
 
 
@@ -258,6 +263,56 @@ fit_mv_ind_full <- peal.fit.RI_mv(
 )
 ```
 
+
+
+```{r unstructured multiple rho}
+source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
+fit_missing_em_unstr <- peal.em.fit.RI_mv(
+  data = rearranged_data,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "unstructured",
+  em_iter = 1, reml = TRUE, verbose = TRUE
+)
+```
+
+
+
+```{r}
+cbind(
+"true" = c(beta) ,
+"full" = fit_mv_full$b,
+"ind_full" = fit_mv_ind_full$b,
+"unstr_em_missing" = fit_missing_em_unstr$b
+) %>% round(4)
+```
+
+
+```{r}
+corr_mat
+fit_missing_em_unstr$Corr
+
+sigma_e^2
+fit_missing_em_unstr$s2
+
+Sigma_e
+fit_missing_em_unstr$Sigma_e
+```
+
+
+
+```{r}
+cbind(
+"true" = c(sigma_u, sigma_v_hosp) ,
+"full" = sqrt(fit_mv_full$theta * fit_mv_full$s2),
+"ind_full" = sqrt(fit_mv_ind_full$theta * fit_mv_ind_full$s2),
+"unstr_em_missing" = sqrt(fit_missing_em_unstr$history$init$theta * fit_missing_em_unstr$history$init$s2)
+) %>% round(4)
+```
+
+
+
+#### More other approach
 
 ```{r cc}
 source("PEAL_Engine_Multi-RI.R")
@@ -333,6 +388,43 @@ fit_mv_ind_missing_mice <- peal.fit.RI_mv(
 ```
 
 
+```{r mice full}}
+source("PEAL_Engine_Multi-RI.R")
+# XYZ
+Y <- as.matrix(rearranged_data_with_missing_mice_full[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data_with_missing_mice_full[, paste0("X", 1:px)])
+X <- cbind(X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data_with_missing_mice_full %>%
+                    filter(site == i) %>%
+                    group_by(site, patient) %>%
+                    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data_with_missing_mice_full$site
+
+fit_mv_missing_mice_full <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "exchangeable",        # or "independence"
+  estimate_rho = TRUE, rho_init = 0.1,  # estimate residual correlation
+  verbose = TRUE
+)
+
+fit_mv_ind_missing_mice_full <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "independence",       
+  estimate_rho = FALSE,
+  verbose = TRUE
+)
+```
+
+
 ```{r observed}
 source("PEAL_Engine_Missing_Multi-RI3.R")
 
@@ -375,7 +467,7 @@ fit_mv_ind_missing <- peal.fit.RI_mv_patterns(
 ```
 
 
-```{r}
+```{r observed EM}
 source("PEAL_Engine_Missing_Multi-RI3.R")
 fit_missing_em <- peal.em.fit.RI_mv(
   data     = rearranged_data_with_missing,
@@ -397,10 +489,10 @@ fit_missing_em_ind <- peal.em.fit.RI_mv(
 ```
 
 
-```{r}
+```{r unstructured multiple rho}
 source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
 fit_missing_em_unstr <- peal.em.fit.RI_mv(
-  data = rearranged_data_with_missing,
+  data = rearranged_data,
   X_cols = X_cols, Y_cols = Y_cols,
   site_col = "site", patient_col = "patient",
   corstr_init = "unstructured",
@@ -408,6 +500,13 @@ fit_missing_em_unstr <- peal.em.fit.RI_mv(
 )
 ```
 
+```{r, eval = F}
+fit_mv_missing_mice$b
+fit_mv_ind_missing_mice$b
+
+fit_mv_missing_mice_full$b
+fit_mv_ind_missing_mice_full$b
+```
 
 
 ```{r}
@@ -424,7 +523,7 @@ cbind(
 "em_missing" = fit_missing_em$b,
 "ind_em_missing" = fit_missing_em_ind$b,
 "unstr_em_missing" = fit_missing_em_unstr$b
-)
+) %>% round(4)
 ```
 
 
@@ -461,7 +560,7 @@ cbind(
 "em_missing" = fit_missing_em$s2 %>% sqrt(),
 "ind_em_missing" = fit_missing_em_ind$s2 %>% sqrt(),
 "unstr_em_missing" = fit_missing_em_unstr$s2 %>% sqrt()
-)
+) %>% round(4)
 ```
 
 
@@ -481,10 +580,10 @@ cbind(
 "ind_missing_mice" = sqrt(fit_mv_ind_missing_mice$theta * fit_mv_ind_missing_mice$s2),
 "missing" = sqrt(fit_mv_missing$theta * fit_mv_missing$s2),
 "ind_missing" = sqrt(fit_mv_ind_missing$theta * fit_mv_ind_missing$s2),
-"em_missing" = sqrt(fit_missing_em$theta * fit_missing_em$history$init$s2),
-"ind_em_missing" = sqrt(fit_missing_em_ind$theta * fit_missing_em_ind$history$init$s2),
-"unstr_em_missing" = sqrt(fit_missing_em_unstr$theta * fit_missing_em_unstr$history$init$s2)
-)
+"em_missing" = sqrt(fit_missing_em$init$theta * fit_missing_em$history$init$s2),
+"ind_em_missing" = sqrt(fit_missing_em_ind$init$theta * fit_missing_em_ind$history$init$s2),
+"unstr_em_missing" = sqrt(fit_missing_em_unstr$history$init$theta * fit_missing_em_unstr$history$init$s2)
+) %>% round(4)
 ```
 
 
