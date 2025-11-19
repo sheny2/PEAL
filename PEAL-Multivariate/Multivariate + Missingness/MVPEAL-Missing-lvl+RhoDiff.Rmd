@@ -228,6 +228,110 @@ rearranged_data_with_missing_mice_full <- complete(mice(rearranged_data_with_mis
 
 
 ```{r full}
+source("PEAL_Engine_Multi-RI_Rho.R")
+# XYZ
+Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
+X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
+X <- cbind(X)
+Z <- list()
+
+for(i in 1:H){
+  count_mat = rearranged_data %>%
+                    filter(site == i) %>%
+                    group_by(site, patient) %>%
+                    dplyr::summarise(n_hi = n(), .groups = 'drop')
+
+  Z[[i]] <- (generate_Zhv_matrix(count_mat))
+}
+
+id.site <- rearranged_data$site
+
+fit_mv_unstr <- peal.fit.RI_mv(
+  Y = Y, X = X, Z = Z, id.site = id.site,
+  weights = NULL, reml = TRUE,
+  corstr = "unstructured",  
+  estimate_rho = TRUE,
+  verbose = TRUE
+)
+```
+
+```{r}
+source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern.R")
+fit_missing_unstr1 <- peal.fit.RI_mv_patterns(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr = "unstructured",
+  reml = TRUE, verbose = TRUE
+)
+
+source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern2.R")
+fit_missing_unstr2 <- peal.fit.RI_mv_patterns(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr = "unstructured",
+  reml = TRUE, verbose = TRUE
+)
+```
+
+
+```{r unstructured multiple rho}
+source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
+fit_missing_em_unstr <- peal.em.fit.RI_mv(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr_init = "unstructured",
+  em_iter = 1, reml = TRUE, verbose = TRUE
+)
+```
+
+
+
+```{r}
+cbind(
+"true" = c(beta) ,
+"full" = fit_mv_unstr$b,
+"unstr_missing" = fit_missing_unstr2$b,
+"unstr_em_missing" = fit_missing_em_unstr$b
+) %>% round(4)
+```
+
+
+```{r}
+corr_mat
+fit_mv_unstr$Corr
+fit_missing_unstr2$Corr
+fit_missing_em_unstr$Corr
+
+sigma_e^2
+fit_mv_unstr$s2
+fit_missing_unstr2$s2
+fit_missing_em_unstr$s2
+
+Sigma_e
+fit_mv_unstr$Sigma_e
+fit_missing_unstr2$Sigma_e
+fit_missing_em_unstr$Sigma_e
+```
+
+
+
+```{r}
+cbind(
+"true" = c(sigma_u, sigma_v_hosp) ,
+"full" = sqrt(fit_mv_unstr$theta * fit_mv_unstr$s2),
+"unstr_missing" = sqrt(fit_missing_unstr2$theta * fit_missing_unstr2$s2),
+"unstr_em_missing" = sqrt(fit_missing_em_unstr$history$init$theta * fit_missing_em_unstr$history$init$s2)
+) %>% round(4)
+```
+
+
+
+#### More other approach
+
+```{r full}
 source("PEAL_Engine_Multi-RI.R")
 # XYZ
 Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
@@ -262,57 +366,6 @@ fit_mv_ind_full <- peal.fit.RI_mv(
   verbose = TRUE
 )
 ```
-
-
-
-```{r unstructured multiple rho}
-source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
-fit_missing_em_unstr <- peal.em.fit.RI_mv(
-  data = rearranged_data,
-  X_cols = X_cols, Y_cols = Y_cols,
-  site_col = "site", patient_col = "patient",
-  corstr_init = "unstructured",
-  em_iter = 1, reml = TRUE, verbose = TRUE
-)
-```
-
-
-
-```{r}
-cbind(
-"true" = c(beta) ,
-"full" = fit_mv_full$b,
-"ind_full" = fit_mv_ind_full$b,
-"unstr_em_missing" = fit_missing_em_unstr$b
-) %>% round(4)
-```
-
-
-```{r}
-corr_mat
-fit_missing_em_unstr$Corr
-
-sigma_e^2
-fit_missing_em_unstr$s2
-
-Sigma_e
-fit_missing_em_unstr$Sigma_e
-```
-
-
-
-```{r}
-cbind(
-"true" = c(sigma_u, sigma_v_hosp) ,
-"full" = sqrt(fit_mv_full$theta * fit_mv_full$s2),
-"ind_full" = sqrt(fit_mv_ind_full$theta * fit_mv_ind_full$s2),
-"unstr_em_missing" = sqrt(fit_missing_em_unstr$history$init$theta * fit_missing_em_unstr$history$init$s2)
-) %>% round(4)
-```
-
-
-
-#### More other approach
 
 ```{r cc}
 source("PEAL_Engine_Multi-RI.R")

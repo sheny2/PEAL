@@ -14,8 +14,8 @@ suppressPackageStartupMessages({
   library(ggplot2)
 })
 
-## ---- Engine (peal.em.fit.RI_mv lives here)
-source("PEAL_Engine_Missing_Multi-RI3-Rho.R")
+## ---- Engine 
+source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern2.R")
 source("PEAL_Engine_Multi-RI_Rho.R")
 
 ## -------------------------
@@ -171,48 +171,20 @@ run_one <- function(seed) {
   }
   
   
-  # --- if full data 
-  Y <- as.matrix(rearranged_data[, paste0("Y", 1:py)])
-  X <- as.matrix(rearranged_data[, paste0("X", 1:px)])
-  X <- cbind(X)
-  Z <- list()
   
-  for(i in 1:H){
-    count_mat = rearranged_data %>%
-      filter(site == i) %>%
-      group_by(site, patient) %>%
-      dplyr::summarise(n_hi = n(), .groups = 'drop')
-    
-    Z[[i]] <- (generate_Zhv_matrix(count_mat))
-  }
-  
-  id.site <- rearranged_data$site
-  
-  
-   ## --- Fit PEAL EM (unstructured) ---
+   ## --- Fit MV-PEAL for outcome missing (unstructured) ---
   fit <- tryCatch(
-    peal.em.fit.RI_mv(
-      data       = rearranged_data_with_missing,
-      # data       = rearranged_data,
+    peal.fit.RI_mv_patterns(
+      # data       = rearranged_data_with_missing,
+      data       = rearranged_data,
       X_cols     = X_cols,
       Y_cols     = Y_cols,
       site_col   = "site",
-      patient_col= "patient",
-      corstr_init= "unstructured",
-      em_iter    = 0,
+      patient_col = "patient",
+      corstr = "unstructured",
       reml       = TRUE,
       verbose    = FALSE
     )
-    # peal.fit.RI_mv(
-    #   Y = Y,
-    #   X = X,
-    #   Z = Z,
-    #   id.site = id.site,
-    #   weights = NULL, reml = TRUE,
-    #   corstr = "unstructured",   # <--- new
-    #   estimate_rho = TRUE,
-    #   verbose = TRUE
-    # )
     ,
     error = function(e) NULL
   )
@@ -227,12 +199,10 @@ run_one <- function(seed) {
   }
   
   # Fixed effects
-  b_hat <- as.numeric(fit$history$init$b)
-  # b_hat <- as.numeric(fit$b)
+  b_hat <- as.numeric(fit$b)
   
   # Random effects SDs: theta * s2 with the initial estimates before EM
-  sigmaRE_hat <- sqrt(fit$history$init$theta * fit$history$init$s2)
-  # sigmaRE_hat <- sqrt(fit$theta * fit$s2)
+  sigmaRE_hat <- sqrt(fit$theta * fit$s2)
   
   # Residual SD
   sigmae_hat <- sqrt(fit$s2)
@@ -259,10 +229,9 @@ registerDoRNG(12345)
 
 results <- foreach(k = 1:N,
                    .packages = c("data.table","dplyr","MASS","Matrix")) %dopar% {
-                     source("PEAL_Engine_Missing_Multi-RI3")
+                     source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern2.R")
                      source("PEAL_Engine_Multi-RI_Rho.R")
-                     # run_one(sample(1:1e6, 1))
-                     run_one(k)
+                     run_one(sample(1:1e6, 1))
                    }
 
 stopCluster(cl)
