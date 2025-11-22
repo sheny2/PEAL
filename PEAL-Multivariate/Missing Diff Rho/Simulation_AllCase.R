@@ -28,7 +28,7 @@ X_cols <- paste0("X", 1:px)
 Y_cols <- paste0("Y", 1:py)
 
 set.seed(1)
-beta_true <- matrix(runif(px * py, -3, 3), nrow = px, ncol = py)
+beta_true <- matrix(runif(px * py, -10, 10), nrow = px, ncol = py)
 
 sigma_u_true      <- 0.5
 sigma_v_hosp_true <- runif(H, min = 0.5, max = 1)   # fixed across sims
@@ -376,7 +376,7 @@ run_one_rep <- function(seed) {
 ## ------------------------------------------------
 ## 6. Parallel simulation
 ## ------------------------------------------------
-N <- 300  # number of replicates
+N <- 1000  # number of replicates
 
 model_names <- c("FULL_IN","FULL_EX","FULL_UN",
                  "OBS_IN","OBS_EX","OBS_UN",
@@ -386,7 +386,7 @@ model_names <- c("FULL_IN","FULL_EX","FULL_UN",
 num_cores <- max(1, parallelly::availableCores())
 cl <- makeCluster(num_cores)
 registerDoParallel(cl)
-registerDoRNG(12345)
+registerDoRNG(123)
 
 results <- foreach(k = 1:N,
                    .packages = c("data.table","dplyr","MASS","Matrix","mice")) %dopar% {
@@ -526,7 +526,7 @@ beta_long$Parameter <- factor(beta_long$Parameter,
 p_beta_bias <- beta_long %>%
   dplyr::mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.01) +
   geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
   facet_wrap(~ Model, ncol = 3, scales = "free_y") +
   theme_bw() + 
@@ -535,11 +535,12 @@ p_beta_bias <- beta_long %>%
   ggtitle("Fixed Effects Bias")
 print(p_beta_bias)
 
+
 # Random-effect SD bias
 p_sigmaRE_bias <- sigmaRE_long %>%
   dplyr::mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
-  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
+  geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.01) +
   geom_boxplot(fill = "lightgreen", alpha = 0.6, outlier.shape = NA) +
   facet_wrap(~ Model, ncol = 3, scales = "free_y") +
   theme_bw() + 
@@ -569,6 +570,7 @@ corr_long_offdiag$Parameter <- factor(corr_long_offdiag$Parameter,
 p_corr_bias <- corr_long_offdiag %>%
   # e.g., restrict to UN models if you want
   dplyr::filter(Model %in% c("FULL_UN","OBS_UN","CC_UN","MICE_UN")) %>%
+  filter(Parameter %in% unique(corr_long_offdiag$Parameter)[c(1,2,4)]) %>%
   dplyr::mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias, fill = Model)) +
   geom_boxplot(position = position_dodge(width = 0.8)) +
@@ -610,10 +612,10 @@ sigmaRE_long %>%
     values_from = Variance
   ) %>%
   mutate(
-    RE_EX_vs_UN = OBS_EX / OBS_UN,
-    RE_IN_vs_UN = OBS_IN / OBS_UN
+    RE_EX_vs_UN = round(OBS_EX / OBS_UN, 2),
+    RE_IN_vs_UN = round(OBS_IN / OBS_UN, 2)
   ) %>%
-  arrange(Parameter)
+  arrange(Parameter) 
 
 sigmae_long %>%
   filter(Model %in% c("OBS_EX", "OBS_IN", "OBS_UN")) %>%

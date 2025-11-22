@@ -35,9 +35,9 @@ sigma_v_hosp_true <- runif(H, min = 0.5, max = 1)   # fixed across sims
 sigma_e_true      <- 0.3
 
 # Non-exchangeable correlation
-rho12 <- -0.20
+rho12 <- -0.2
 rho13 <- 0.35
-rho23 <- 0.80
+rho23 <- 0.9
 corr_mat_true <- matrix(c(
   1,     rho12, rho13,
   rho12, 1,     rho23,
@@ -85,7 +85,7 @@ simulate_one <- function(seed) {
   set.seed(seed)
   
   # --- DGP ---
-  m_hosp <- sample(50:75, H, replace = TRUE)
+  m_hosp <- sample(50:100, H, replace = TRUE)
   nn     <- rep(m_hosp, times = 1)
   id.hosp <- rep(seq_len(H), times = m_hosp)
   id.pat  <- sequence(nn)
@@ -142,7 +142,7 @@ simulate_one <- function(seed) {
   
   p1_base <- 0.2
   p2_base <- 0.3
-  p3_base <- 0.5
+  p3_base <- 0.6
   
   # Y3 depends on Y1,Y2 observed
   Y3_miss_prob <- ifelse(!is.na(rearranged_data$Y1) & !is.na(rearranged_data$Y2),
@@ -342,7 +342,7 @@ run_one_rep <- function(seed) {
 ## ------------------------------------------------
 ## 6. Parallel simulation
 ## ------------------------------------------------
-N <- 200  # number of replicates
+N <- 100  # number of replicates
 
 model_names <- c("FULL_IN","FULL_EX","FULL_UN",
                  "OBS_IN","OBS_EX","OBS_UN")
@@ -363,8 +363,8 @@ results <- foreach(k = 1:N, .packages = c("data.table","dplyr","MASS")) %dopar% 
 stopCluster(cl)
 
 
-saveRDS(results, file = "Simulation6Case_Results.rds")
-results <- readRDS("Simulation6Case_Results.rds")
+# saveRDS(results, file = "Simulation6Case_Results.rds")
+# results <- readRDS("Simulation6Case_Results.rds")
 
 
 
@@ -491,6 +491,7 @@ beta_long$Parameter <- factor(beta_long$Parameter,
                               levels = paste0("Beta", 1:(px*py)))
 
 p_beta_bias <- beta_long %>%
+  dplyr::filter(Model %in% c("FULL_UN","OBS_UN")) %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
@@ -505,6 +506,7 @@ print(p_beta_bias)
 
 # Random-effect SD bias
 p_sigmaRE_bias <- sigmaRE_long %>%
+  dplyr::filter(Model %in% c("FULL_UN","OBS_UN")) %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias)) +
   geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
@@ -518,6 +520,7 @@ print(p_sigmaRE_bias)
 
 # Residual SD bias
 p_sigmae_bias <- sigmae_long %>%
+  # dplyr::filter(Model %in% c("FULL_UN","OBS_UN")) %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Model, y = Bias)) +
   geom_boxplot(fill = "orange", alpha = 0.6, outlier.shape = NA) +
@@ -538,9 +541,8 @@ corr_long_offdiag$Parameter <- factor(corr_long_offdiag$Parameter,
 p_corr_bias <- corr_long_offdiag %>%
   filter(!Model %in% c("FULL_IN", "OBS_IN"))%>% 
   filter(!Model %in% c("FULL_EX", "OBS_EX"))%>%
-  filter(Parameter %in% unique(corr_long_offdiag$Parameter)[
-    seq_len(n_distinct(Parameter) / 2)
-  ]) %>%
+  dplyr::filter(Model %in% c("FULL_UN","OBS_UN")) %>%
+  filter(Parameter %in% unique(corr_long_offdiag$Parameter)[c(1,2,4)]) %>%
   mutate(Bias = Estimate - True) %>%
   ggplot(aes(x = Parameter, y = Bias, fill = Model)) +
   geom_boxplot(position = position_dodge(width = 0.8)) +
@@ -549,6 +551,7 @@ p_corr_bias <- corr_long_offdiag %>%
   ggtitle("Correlation Parameter Bias (off-diagonals)")
 print(p_corr_bias)
 
+gridExtra::grid.arrange(p_beta_bias, p_sigmae_bias, p_sigmaRE_bias, p_corr_bias)
 
 # Variance & Relative Efficiency comparisons
 beta_long %>%
@@ -602,8 +605,6 @@ sigmae_long %>%
   ) %>%
   arrange(Parameter)
 
-
-gridExtra::grid.arrange(p_beta_bias, p_sigmae_bias, p_sigmaRE_bias, p_corr_bias)
 
 # Numeric summaries:
 beta_summary
