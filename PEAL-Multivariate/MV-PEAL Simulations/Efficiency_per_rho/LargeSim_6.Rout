@@ -1,0 +1,622 @@
+
+R version 4.3.1 Patched (2023-07-19 r84711) -- "Beagle Scouts"
+Copyright (C) 2023 The R Foundation for Statistical Computing
+Platform: x86_64-conda-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> suppressPackageStartupMessages({
++   library(doParallel)
++   library(doRNG)
++   library(foreach)
++   library(data.table)
++   library(dplyr)
++   library(MASS)
++   library(reshape2)
++   library(ggplot2)
++   library(Matrix)    # for nearPD
++   library(gridExtra) # for grid.arrange
++   library(tidyr)     # for pivot_wider
++ })
+> 
+> ## ------------------------------------------------
+> ## 1. Global settings and true parameters
+> ## ------------------------------------------------
+> 
+> source("MV-PEAL_Pattern.R")
+> 
+> H      <- 5    # number of sites
+> px     <- 4
+> p_bin  <- 2
+> p_cont <- px - p_bin
+> py     <- 3   # number of outcomes
+> 
+> X_cols <- paste0("X", 1:px)
+> Y_cols <- paste0("Y", 1:py)
+> 
+> set.seed(1)
+> beta_true <- matrix(runif(px * py, -3, 3), nrow = px, ncol = py)
+> 
+> sigma_u_true      <- 0.5
+> sigma_v_hosp_true <- runif(H, min = 0.5, max = 1)   # fixed across sims
+> sigma_e_true      <- 0.3
+> 
+> sigma_e_vec <- rep(sigma_e_true, py)
+> De          <- diag(sigma_e_vec, py)
+> 
+> # True parameter vectors for later comparison (not including corr, which is rho-specific)
+> true_beta_vec     <- c(beta_true)
+> true_sigmaRE_vec  <- c(sigma_u_true, sigma_v_hosp_true)  # length H+1
+> true_sigma_e      <- sigma_e_true
+> 
+> par_names_beta    <- paste0("Beta", 1:(px * py))
+> par_names_sigmaRE <- c("sigma_u", paste0("sigma_v_", 1:H))
+> par_name_sigma_e  <- "sigma_e"
+> corr_param_names  <- paste0("rho_", rep(1:py, each = py), "_", rep(1:py, times = py))
+> 
+> ## ------------------------------------------------
+> ## 2. Helper: build Z list (site-wise random intercepts)
+> ## ------------------------------------------------
+> build_Z_list <- function(dat, H) {
++   Z <- vector("list", H)
++   for (i in 1:H) {
++     count_mat <- dat %>%
++       dplyr::filter(site == i) %>%
++       dplyr::group_by(site, patient) %>%
++       dplyr::summarise(n_hi = n(), .groups = "drop")
++     Z[[i]] <- generate_Zhv_matrix(count_mat)
++   }
++   Z
++ }
+> 
+> ## ------------------------------------------------
+> ## 3. Single replicate DGP: MAR-masked data
+> ##    (takes Sigma_e as an argument)
+> ## ------------------------------------------------
+> simulate_one <- function(seed, Sigma_e) {
++   set.seed(seed)
++   
++   # --- DGP ---
++   m_hosp <- sample(50:100, H, replace = TRUE)
++   nn     <- rep(m_hosp, times = 1)
++   id.hosp <- rep(seq_len(H), times = m_hosp)
++   id.pat  <- sequence(nn)
++   n_visits <- sample(1:30, sum(nn), replace = TRUE)
++   
++   id.visit         <- sequence(n_visits)
++   id.hosp.expanded <- rep(id.hosp, times = n_visits)
++   id.pat.expanded  <- rep(id.pat,  times = n_visits)
++   
++   # Random effects
++   u_h  <- rnorm(H, mean = 0, sd = sigma_u_true)
++   v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp_true, times = m_hosp))
++   
++   u_h_patient   <- rep(u_h, times = m_hosp)
++   u_h_expanded  <- rep(u_h_patient, times = n_visits)
++   v_hi_expanded <- rep(v_hi, times = n_visits)
++   
++   # Covariates
++   Nobs   <- sum(n_visits)
++   X_bin  <- matrix(rbinom(Nobs * p_bin, 1, 0.3), nrow = Nobs, ncol = p_bin)
++   X_cont <- matrix(rnorm(Nobs * p_cont, 0, 1),   nrow = Nobs, ncol = p_cont)
++   X_hij  <- cbind(X_bin, X_cont)
++   
++   # Residuals with given Sigma_e
++   epsilon_hij <- MASS::mvrnorm(n = Nobs, mu = rep(0, py), Sigma = Sigma_e)
++   
++   # Outcomes
++   Y_hij <- matrix(0, nrow = Nobs, ncol = py)
++   for (k in 1:py) {
++     Y_hij[, k] <- X_hij %*% beta_true[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
++   }
++   
++   three_lvl_dat <- data.table(
++     site    = id.hosp.expanded,
++     patient = id.pat.expanded,
++     visit   = id.visit,
++     X_hij, Y_hij
++   ) %>% as.data.frame()
++   
++   data.table::setnames(three_lvl_dat,
++                        c("site","patient","visit", paste0("X",1:px), paste0("Y",1:py)))
++   
++   visit_count <- three_lvl_dat %>%
++     group_by(site, patient) %>%
++     summarise(total_visits = n(), .groups = "drop")
++   
++   rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site","patient")) %>%
++     arrange(site, total_visits, patient) %>%
++     mutate(site = factor(site))
++   
++   ## --- MAR missingness ---
++   rearranged_data_with_missing <- rearranged_data
++   n <- nrow(rearranged_data)
++   
++   p1_base <- 0.3
++   p2_base <- 0.5
++   p3_base <- 0.7
++   
++   # Y3 depends on Y1,Y2 observed
++   Y3_miss_prob <- ifelse(!is.na(rearranged_data$Y1) & !is.na(rearranged_data$Y2),
++                          p3_base + 0.01,
++                          p3_base - 0.01)
++   Y3_miss_prob <- pmin(pmax(Y3_miss_prob, 0), 1)
++   Y3_missing   <- rbinom(n, 1, Y3_miss_prob) == 1
++   rearranged_data_with_missing$Y3[Y3_missing] <- NA
++   
++   # Y1, Y2 depend on Y3 observed
++   Y1_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
++                          p1_base + 0.01,
++                          p1_base - 0.01)
++   Y2_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
++                          p2_base + 0.01,
++                          p2_base - 0.01)
++   Y1_miss_prob <- pmin(pmax(Y1_miss_prob, 0), 1)
++   Y2_miss_prob <- pmin(pmax(Y2_miss_prob, 0), 1)
++   
++   Y1_missing <- rbinom(n, 1, Y1_miss_prob) == 1
++   Y2_missing <- rbinom(n, 1, Y2_miss_prob) == 1
++   
++   rearranged_data_with_missing$Y1[Y1_missing] <- NA
++   rearranged_data_with_missing$Y2[Y2_missing] <- NA
++   
++   # Ensure no row with all Y's missing
++   all_y_missing <- apply(
++     rearranged_data_with_missing[, paste0("Y",1:py), drop = FALSE],
++     1, function(x) all(is.na(x))
++   )
++   if (any(all_y_missing)) {
++     for (i in which(all_y_missing)) {
++       y_to_keep <- sample(paste0("Y",1:py), 1)
++       rearranged_data_with_missing[i, y_to_keep] <-
++         rearranged_data[i, y_to_keep]
++     }
++   }
++   
++   list(
++     full   = rearranged_data,
++     miss   = rearranged_data_with_missing
++   )
++ }
+> 
+> ## ------------------------------------------------
+> ## 4. Fit helpers and packers
+> ## ------------------------------------------------
+> 
+> pack_fit <- function(fit, corstr, py, H) {
++   if (is.null(fit)) {
++     return(list(
++       b        = rep(NA_real_, px * py),
++       b_sd     = rep(NA_real_, px * py),
++       sigmaRE  = rep(NA_real_, H + 1),
++       sigma_e  = NA_real_,
++       corr_vec = rep(NA_real_, py * py)
++     ))
++   }
++   b_hat       <- as.numeric(fit$b)
++   b_hat_sd       <- as.numeric(fit$b_sd)
++   sigmaRE_hat <- sqrt(fit$theta * fit$s2)  # H+1 random-effect SDs
++   sigmae_hat  <- sqrt(fit$s2)
++   
++   if (!is.null(fit$Corr)) {
++     Corr_hat     <- fit$Corr
++     corr_vec_hat <- as.vector(Corr_hat)
++   } else {
++     corr_vec_hat <- rep(NA_real_, py * py)
++   }
++   
++   list(
++     b        = b_hat,
++     b_sd     = b_hat_sd,
++     sigmaRE  = sigmaRE_hat,
++     sigma_e  = sigmae_hat,
++     corr_vec = corr_vec_hat         
++   )
++ }
+> 
+> 
+> 
+> fit_pattern_models <- function(dat_miss) {
++   fit_in <- tryCatch(
++     peal.fit.RI_mv_patterns(
++       data         = dat_miss,
++       X_cols       = X_cols,
++       Y_cols       = Y_cols,
++       site_col     = "site",
++       patient_col  = "patient",
++       corstr       = "independence",
++       reml         = TRUE,
++       verbose      = FALSE
++     ),
++     error = function(e) NULL
++   )
++   res_in <- pack_fit(fit_in, "independence", py, H)
++   
++   fit_ex <- tryCatch(
++     peal.fit.RI_mv_patterns(
++       data         = dat_miss,
++       X_cols       = X_cols,
++       Y_cols       = Y_cols,
++       site_col     = "site",
++       patient_col  = "patient",
++       corstr       = "exchangeable",
++       reml         = TRUE,
++       verbose      = FALSE
++     ),
++     error = function(e) NULL
++   )
++   res_ex <- pack_fit(fit_ex, "exchangeable", py, H)
++   
++   fit_un <- tryCatch(
++     peal.fit.RI_mv_patterns(
++       data         = dat_miss,
++       X_cols       = X_cols,
++       Y_cols       = Y_cols,
++       site_col     = "site",
++       patient_col  = "patient",
++       corstr       = "unstructured",
++       reml         = TRUE,
++       verbose      = FALSE
++     ),
++     error = function(e) NULL
++   )
++   res_un <- pack_fit(fit_un, "unstructured", py, H)
++   
++   list(
++     OBS_IN = res_in,
++     OBS_EX = res_ex,
++     OBS_UN = res_un
++   )
++ }
+> 
+> ## ------------------------------------------------
+> ## 5. One replicate wrapper (takes Sigma_e)
+> ## ------------------------------------------------
+> run_one_rep <- function(seed, Sigma_e) {
++   sim <- simulate_one(seed, Sigma_e)
++   patt_res <- fit_pattern_models(sim$miss)
++   c(patt_res)
++ }
+> 
+> ## ------------------------------------------------
+> ## 6. Helper to init matrices and long-format helper
+> ## ------------------------------------------------
+> init_mat <- function(nr, N) {
++   matrix(NA_real_, nrow = nr, ncol = N,
++          dimnames = list(NULL, paste0("sim", 1:N)))
++ }
+> 
+> mk_long <- function(mat, par_names, model_label, value_nm = "Estimate") {
++   df <- reshape2::melt(as.data.frame(mat), value.name = value_nm)
++   names(df) <- c("Simulation", value_nm)
++   df$Parameter <- rep(par_names, ncol(mat))
++   df$Model <- model_label
++   df
++ }
+> 
+> ## ------------------------------------------------
+> ## 7. BIG DRIVER: run whole pipeline for one (rho12,rho13,rho23)
+> ## ------------------------------------------------
+> run_sim_for_rhos <- function(rho12, rho13, rho23,
++                              N = 100,
++                              label = NULL) {
++   if (is.null(label)) {
++     label <- paste0("rho_",
++                     paste(sprintf("%0.2f", c(rho12, rho13, rho23)),
++                           collapse = "_"))
++   }
++   cat("=== Running simulation for", label, "===\n")
++   
++   # Build correlation matrix and Sigma_e for this setting
++   corr_mat_true <- matrix(c(
++     1,      rho12,  rho13,
++     rho12,  1,      rho23,
++     rho13,  rho23,  1
++   ), nrow = py, byrow = TRUE)
++   
++   # Ensure SPD
++   if (min(eigen(corr_mat_true, symmetric = TRUE, only.values = TRUE)$values) <= 0) {
++     corr_mat_true <- as.matrix(nearPD(corr_mat_true, corr = TRUE)$mat)
++   }
++   
++   Sigma_e <- De %*% corr_mat_true %*% De
++   true_corr_vec <- as.vector(corr_mat_true)
++   
++   model_names <- c("OBS_IN","OBS_EX","OBS_UN")
++   
++   ## ------------------------------------------------
++   ## Parallel simulation: use SLURM cpus-per-task
++   ## ------------------------------------------------
++   num_cores <- as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1"))
++   if (is.na(num_cores) || num_cores < 1) num_cores <- 1
++   
++   cat("Using", num_cores, "cores for foreach.\n")
++   
++   cl <- makeCluster(num_cores)
++   registerDoParallel(cl)
++   
++   # Seed base can depend on label if you want, but constant is fine per rho-setting
++   registerDoRNG(8848)
++   
++   results <- foreach(
++     k = 1:N,
++     .packages = c("data.table","dplyr","MASS","Matrix","reshape2"),
++     .export   = c(
++       "run_one_rep",
++       "simulate_one",
++       "fit_pattern_models",
++       "pack_fit",
++       "H", "px", "p_bin", "p_cont", "py",
++       "X_cols", "Y_cols",
++       "sigma_u_true", "sigma_v_hosp_true",
++       "beta_true", "De"
++     )
++   ) %dopar% {
++     # each worker re-sources the PEAL code
++     source("MV-PEAL_Pattern.R")
++     
++     # Sigma_e is captured from the enclosing environment
++     run_one_rep(sample(1:1e6, 1), Sigma_e)
++   }
++   
++   stopCluster(cl)
++   
++   # Save raw results
++   saveRDS(results, file = paste0("Simulation_Results_", label, ".rds"))
++   
++   ## ------------------------------------------------
++   ## Collect results
++   ## ------------------------------------------------
++   store <- lapply(model_names, function(nm) {
++     list(
++       beta    = init_mat(px * py, N),
++       sigmaRE = init_mat(H + 1, N),
++       sigma_e = init_mat(1, N),
++       corr    = init_mat(py * py, N)
++     )
++   })
++   names(store) <- model_names
++   
++   for (k in seq_along(results)) {
++     resk <- results[[k]]
++     for (nm in model_names) {
++       store[[nm]]$beta[,   k] <- resk[[nm]]$b
++       store[[nm]]$sigmaRE[,k] <- resk[[nm]]$sigmaRE
++       store[[nm]]$sigma_e[,k] <- resk[[nm]]$sigma_e
++       store[[nm]]$corr[,  k]  <- resk[[nm]]$corr_vec
++     }
++   }
++   
++   ## ------------------------------------------------
++   ## Bias summaries
++   ## ------------------------------------------------
++   # 1) beta
++   beta_long <- do.call(rbind, lapply(names(store), function(nm) {
++     mk_long(store[[nm]]$beta, par_names_beta, nm, "Estimate")
++   }))
++   beta_long$True <- rep(true_beta_vec,
++                         times = ncol(store[[1]]$beta) * length(store))
++   
++   # 2) sigmaRE
++   sigmaRE_long <- do.call(rbind, lapply(names(store), function(nm) {
++     mk_long(store[[nm]]$sigmaRE, par_names_sigmaRE, nm, "Estimate")
++   }))
++   sigmaRE_long$True <- rep(true_sigmaRE_vec,
++                            times = ncol(store[[1]]$sigmaRE) * length(store))
++   
++   # 3) sigma_e
++   sigmae_long <- do.call(rbind, lapply(names(store), function(nm) {
++     mk_long(store[[nm]]$sigma_e, par_name_sigma_e, nm, "Estimate")
++   }))
++   sigmae_long$True <- rep(true_sigma_e,
++                           times = ncol(store[[1]]$sigma_e) * length(store))
++   
++   # 4) corr
++   corr_long <- do.call(rbind, lapply(names(store), function(nm) {
++     mk_long(store[[nm]]$corr, corr_param_names, nm, "Estimate")
++   }))
++   corr_long$True <- rep(true_corr_vec,
++                         times = ncol(store[[1]]$corr) * length(store))
++   
++   ## ------------------------------------------------
++   ## Plots
++   ## ------------------------------------------------
++   beta_long$Parameter <- factor(beta_long$Parameter,
++                                 levels = paste0("Beta", 1:(px*py)))
++   
++   p_beta_bias <- beta_long %>%
++     mutate(Bias = Estimate - True) %>%
++     ggplot(aes(x = Parameter, y = Bias)) +
++     geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
++     geom_boxplot(fill = "lightblue", alpha = 0.6, outlier.shape = NA) +
++     facet_wrap(~ Model, ncol = 3, scales = "free_y") +
++     theme_bw() + 
++     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
++     geom_hline(yintercept = 0, color = "red", linetype = "dashed", linewidth = 0.7) +
++     ggtitle(paste("Fixed Effects Bias -", label))
++   
++   p_sigmaRE_bias <- sigmaRE_long %>%
++     mutate(Bias = Estimate - True) %>%
++     ggplot(aes(x = Parameter, y = Bias)) +
++     geom_jitter(alpha = 0.1, width = 0.15, height = 0, size = 0.3) +
++     geom_boxplot(fill = "lightgreen", alpha = 0.6, outlier.shape = NA) +
++     facet_wrap(~ Model, ncol = 3, scales = "free_y") +
++     theme_bw() + 
++     theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
++     geom_hline(yintercept = 0, color = "red", linetype = "dashed", linewidth = 0.7) +
++     ggtitle(paste("Random-effect SD Bias -", label))
++   
++   p_sigmae_bias <- sigmae_long %>%
++     mutate(Bias = Estimate - True) %>%
++     ggplot(aes(x = Model, y = Bias)) +
++     geom_boxplot(fill = "orange", alpha = 0.6) +
++     theme_bw() +
++     geom_hline(yintercept = 0, color = "red", linetype = "dashed", linewidth = 0.7) +
++     ggtitle(paste("Residual SD Bias -", label))
++   
++   corr_long_offdiag <- corr_long %>%
++     mutate(i = as.integer(substr(Parameter, 5, 5)),
++            j = as.integer(substr(Parameter, 7, 7))) %>%
++     filter(i != j)
++   corr_long_offdiag$Parameter <- factor(corr_long_offdiag$Parameter,
++                                         levels = unique(corr_long_offdiag$Parameter))
++   
++   p_corr_bias <- corr_long_offdiag %>%
++     filter(Parameter %in% unique(corr_long_offdiag$Parameter)[c(1,2,4)]) %>%
++     mutate(Bias = Estimate - True) %>%
++     ggplot(aes(x = Parameter, y = Bias, fill = Model)) +
++     geom_boxplot(position = position_dodge(width = 0.8)) +
++     theme_bw() +
++     geom_hline(yintercept = 0, color = "black", linetype = "dashed", linewidth = 0.7) +
++     ggtitle(paste("Correlation Parameter Bias (off-diagonals) -", label))
++   
++   # Arrange grid and save
++   grid_plot <- gridExtra::grid.arrange(
++     p_beta_bias, p_sigmae_bias, p_sigmaRE_bias, p_corr_bias,
++     ncol = 2
++   )
++   
++   ggsave(filename = paste0("BiasGrid_", label, ".png"),
++          plot = grid_plot, width = 10, height = 8)
++   
++   ## ------------------------------------------------
++   ## Variance & Relative Efficiency comparisons
++   ## ------------------------------------------------
++   RE_table <- beta_long %>%
++     filter(Model %in% c("OBS_EX", "OBS_IN", "OBS_UN")) %>%
++     group_by(Model, Parameter) %>%
++     summarise(
++       Variance = var(Estimate, na.rm = TRUE),
++       .groups = "drop"
++     ) %>%
++     tidyr::pivot_wider(
++       names_from = Model,
++       values_from = Variance
++     ) %>%
++     mutate(
++       RE_EX_vs_UN = OBS_EX / OBS_UN,
++       RE_IN_vs_UN = OBS_IN / OBS_UN
++     ) %>%
++     arrange(Parameter)
++   
++   print(RE_table)
++   
++   saveRDS(RE_table, file = paste0("RE_table_beta_", label, ".rds"))
++   
++   invisible(list(
++     results      = results,
++     RE_beta      = RE_table,
++     beta_long    = beta_long,
++     sigmaRE_long = sigmaRE_long,
++     sigmae_long  = sigmae_long,
++     corr_long    = corr_long
++   ))
++ }
+> 
+> ## ------------------------------------------------
+> ## 8. Rho-grid and SLURM array dispatch
+> ## ------------------------------------------------
+> 
+> rho_grid <- list(
++ c(0.05, 0.10, 0.15),
++ c(0.15, 0.20, 0.25),
++ c(0.25, 0.30, 0.35),
++ c(0.35, 0.40, 0.45),
++ c(0.45, 0.50, 0.55),
++ c(0.55, 0.60, 0.65),
++ c(0.65, 0.70, 0.75),
++ c(0.75, 0.80, 0.85)
++ )
+> 
+> rho_grid <- list(
++ c(0.05, 0.10, 0.15),
++ c(0.05, 0.15, 0.25),
++ c(0.05, 0.20, 0.35),
++ c(0.05, 0.25, 0.45),
++ c(0.05, 0.30, 0.55),
++ c(0.05, 0.35, 0.65),
++ c(0.05, 0.45, 0.75),
++ c(0.05, 0.50, 0.85)
++ )
+> 
+> names(rho_grid) <- sapply(rho_grid, function(r) {
++   paste0("rho_", paste(sprintf("%0.2f", r), collapse = "_"))
++ })
+> 
+> # Get SLURM array index (default to 1 if not running under SLURM)
+> task_id <- as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID", "1"))
+> 
+> if (is.na(task_id) || task_id < 1 || task_id > length(rho_grid)) {
++   stop("Invalid SLURM_ARRAY_TASK_ID: ", task_id,
++        ". It must be between 1 and ", length(rho_grid), ".")
++ }
+> 
+> r_vec  <- rho_grid[[task_id]]
+> label  <- names(rho_grid)[task_id]
+> 
+> cat("### SLURM_ARRAY_TASK_ID =", task_id, "###\n")
+### SLURM_ARRAY_TASK_ID = 6 ###
+> cat("### Running rho setting:", label, "###\n")
+### Running rho setting: rho_0.05_0.35_0.65 ###
+> 
+> # Choose number of sims per rho-setting
+> N_sim <- 500
+> 
+> out_this <- run_sim_for_rhos(
++   rho12 = r_vec[1],
++   rho13 = r_vec[2],
++   rho23 = r_vec[3],
++   N     = N_sim,
++   label = label
++ )
+=== Running simulation for rho_0.05_0.35_0.65 ===
+Using 40 cores for foreach.
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+No id variables; using all as measure variables
+# A tibble: 12 × 6
+   Parameter    OBS_EX    OBS_IN    OBS_UN RE_EX_vs_UN RE_IN_vs_UN
+   <fct>         <dbl>     <dbl>     <dbl>       <dbl>       <dbl>
+ 1 Beta1     0.000109  0.000109  0.000107        1.02         1.02
+ 2 Beta2     0.0000941 0.0000967 0.0000953       0.988        1.01
+ 3 Beta3     0.0000250 0.0000249 0.0000244       1.02         1.02
+ 4 Beta4     0.0000231 0.0000233 0.0000229       1.01         1.02
+ 5 Beta5     0.000147  0.000150  0.000138        1.06         1.09
+ 6 Beta6     0.000161  0.000167  0.000149        1.08         1.12
+ 7 Beta7     0.0000345 0.0000360 0.0000338       1.02         1.07
+ 8 Beta8     0.0000359 0.0000369 0.0000336       1.07         1.10
+ 9 Beta9     0.000222  0.000253  0.000206        1.08         1.23
+10 Beta10    0.000245  0.000283  0.000219        1.12         1.29
+11 Beta11    0.0000568 0.0000633 0.0000499       1.14         1.27
+12 Beta12    0.0000534 0.0000616 0.0000465       1.15         1.33
+> 
+> # Optional: save a summary object per array
+> saveRDS(out_this, file = paste0("AllOut_", label, ".rds"))
+> 
+> cat("Finished rho setting:", label, "\n")
+Finished rho setting: rho_0.05_0.35_0.65 
+> 
+> proc.time()
+    user   system  elapsed 
+   3.439    0.400 2788.305 

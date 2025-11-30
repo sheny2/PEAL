@@ -1,0 +1,240 @@
+
+R version 4.3.1 Patched (2023-07-19 r84711) -- "Beagle Scouts"
+Copyright (C) 2023 The R Foundation for Statistical Computing
+Platform: x86_64-conda-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> library(dplyr)
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+> library(tidyr)
+> library(ggplot2)
+> library(purrr)
+> 
+> ## ------------------------------------------------
+> ## 0. Missingness grid meta (must match simulation)
+> ##    
+> ## ------------------------------------------------
+> 
+> miss_grid <- data.frame(
++   setting  = paste0("miss_", 1:8),
++   #p1_base  = rep(0.20, 8),
++   #p1_base  = rep(0.20, 8),
++   #p1_base  = seq(0.1, 0.15, length.out = 8),
++   #p2_base  = seq(0.1, 0.55, length.out = 8),
++   p1_base  = seq(0.1, 0.8, length.out = 8),
++   p2_base  = seq(0.1, 0.8, length.out = 8),
++   p3_base  = seq(0.1, 0.8, length.out = 8)
++ ) %>% mutate(missing_base_avg = round((p1_base+ p2_base+ p3_base)/3,2)) %>%
++   mutate(
++     scenario_id    = row_number(),
++     scenario_label = missing_base_avg
++   )
+> 
+> miss_meta <- miss_grid
+> 
+> miss_meta$scenario_label <- factor(
++   miss_meta$scenario_label,
++   levels = miss_meta$scenario_label  # ordered by increasing missing rate
++ )
+> 
+> ## ================================================================
+> ## 1. Relative efficiency across missingness settings
+> ## ================================================================
+> 
+> RE_all <- map_dfr(miss_meta$setting, function(lbl) {
++   tab <- readRDS(paste0("RE_table_beta_", lbl, ".rds"))  # from simulation
++   tab$setting <- lbl
++   tab
++ })
+> 
+> # Attach p1_base, p2_base, p3_base, scenario_id, scenario_label
+> RE_all <- RE_all %>%
++   left_join(
++     miss_meta %>% select(setting, p1_base, p2_base, p3_base,
++                          scenario_id, scenario_label),
++     by = "setting"
++   )
+> 
+> RE_long <- RE_all %>%
++   select(Parameter, setting, scenario_id,
++          p1_base, p2_base, p3_base, scenario_label,
++          RE_EX_vs_UN, RE_IN_vs_UN) %>%
++   pivot_longer(
++     cols      = c(RE_EX_vs_UN, RE_IN_vs_UN),
++     names_to  = "Comparison",
++     values_to = "RE"
++   ) %>%
++   mutate(
++     Comparison = dplyr::recode(Comparison,
++                                RE_EX_vs_UN = "EX vs UN",
++                                RE_IN_vs_UN = "IN vs UN")
++   )
+> 
+> ggplot(RE_long,
++        aes(x = scenario_label, y = RE,
++            group = Comparison, color = Comparison)) +
++   geom_hline(yintercept = 1, color = "black", linetype = "dashed", linewidth = 0.7, alpha = 0.5) +
++   geom_line() +
++   geom_point() +
++   facet_wrap(~ Parameter, ncol = 4) +
++   theme_bw() +
++   theme(
++     axis.text.x = element_text(angle = 45, hjust = 1),
++     legend.position = "top"
++   ) +
++   labs(
++     x = "Average Missingness Rate",
++     y = "Relative efficiency vs UN (Variance ratio)",
++     title = "Relative Efficiency of EX and IN vs UN across missingness settings"
++   )
+> 
+> ## ================================================================
+> ## 2. Bias of betas across missingness settings
+> ## ================================================================
+> 
+> Bias_beta_all <- map_dfr(miss_meta$setting, function(lbl) {
++   out <- readRDS(paste0("AllOut_", lbl, ".rds"))  # contains beta_long, etc.
++   
++   out$beta_long %>%
++     mutate(Bias = Estimate - True) %>%
++     group_by(Model, Parameter) %>%   # average over simulations
++     summarise(
++       Bias = mean(Bias, na.rm = TRUE),
++       .groups = "drop"
++     ) %>%
++     mutate(setting = lbl)
++ })
+> 
+> Bias_beta_all <- Bias_beta_all %>%
++   left_join(
++     miss_meta %>% select(setting, p1_base, p2_base, p3_base,
++                          scenario_id, scenario_label),
++     by = "setting"
++   )
+> 
+> ggplot(Bias_beta_all,
++        aes(x = scenario_label, y = Bias,
++            group = Model, color = Model)) +
++   geom_line() +
++   geom_point() +
++   facet_wrap(~ Parameter, ncol = 4, scales = "free_y") +
++   theme_bw() +
++   theme(
++     axis.text.x = element_text(angle = 45, hjust = 1),
++     legend.position = "top"
++   ) +
++   labs(
++     x = "Missingness scenario",
++     y = "Mean Bias of beta",
++     title = "Bias of beta estimates across missingness settings"
++   )
+> 
+> ## ================================================================
+> ## 3. Bias of random-effect sigmas across missingness settings
+> ## ================================================================
+> 
+> Bias_sigmaRE_all <- map_dfr(miss_meta$setting, function(lbl) {
++   out <- readRDS(paste0("AllOut_", lbl, ".rds"))  # contains sigmaRE_long
++   
++   out$sigmaRE_long %>%
++     mutate(Bias = Estimate - True) %>%
++     group_by(Model, Parameter) %>%
++     summarise(
++       Bias = mean(Bias, na.rm = TRUE),
++       .groups = "drop"
++     ) %>%
++     mutate(setting = lbl)
++ })
+> 
+> Bias_sigmaRE_all <- Bias_sigmaRE_all %>%
++   left_join(
++     miss_meta %>% select(setting, p1_base, p2_base, p3_base,
++                          scenario_id, scenario_label),
++     by = "setting"
++   )
+> 
+> ggplot(Bias_sigmaRE_all,
++        aes(x = scenario_label, y = Bias,
++            group = Model, color = Model)) +
++   geom_line() +
++   geom_point() +
++   facet_wrap(~ Parameter, ncol = 4, scales = "free_y") +
++   theme_bw() +
++   theme(
++     axis.text.x = element_text(angle = 45, hjust = 1),
++     legend.position = "top"
++   ) +
++   labs(
++     x = "Missingness scenario",
++     y = "Mean Bias of random-effect SDs",
++     title = "Bias of random-effect standard deviations across missingness settings"
++   )
+> 
+> ## ================================================================
+> ## 4. Bias of residual sigma_e across missingness settings
+> ## ================================================================
+> 
+> Bias_sigmae_all <- map_dfr(miss_meta$setting, function(lbl) {
++   out <- readRDS(paste0("AllOut_", lbl, ".rds"))  # contains sigmae_long
++   
++   out$sigmae_long %>%
++     mutate(Bias = Estimate - True) %>%
++     group_by(Model, Parameter) %>%
++     summarise(
++       Bias = mean(Bias, na.rm = TRUE),
++       .groups = "drop"
++     ) %>%
++     mutate(setting = lbl)
++ })
+> 
+> Bias_sigmae_all <- Bias_sigmae_all %>%
++   left_join(
++     miss_meta %>% select(setting, p1_base, p2_base, p3_base,
++                          scenario_id, scenario_label),
++     by = "setting"
++   )
+> 
+> ggplot(Bias_sigmae_all,
++        aes(x = scenario_label, y = Bias,
++            group = Model, color = Model)) +
++   geom_line() +
++   geom_point() +
++   theme_bw() +
++   theme(
++     axis.text.x = element_text(angle = 45, hjust = 1),
++     legend.position = "top"
++   ) +
++   labs(
++     x = "Missingness scenario",
++     y = "Mean Bias of residual SD (sigma_e)",
++     title = "Bias of residual standard deviation across missingness settings"
++   )
+> 
+> proc.time()
+   user  system elapsed 
+  3.645   0.163   3.878 
