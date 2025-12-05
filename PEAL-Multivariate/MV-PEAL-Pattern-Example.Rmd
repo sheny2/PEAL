@@ -1,0 +1,305 @@
+---
+title: "Multi-Analysis"
+author: "Yicheng Shen"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, eval = T, cache = F, warning = T, message = T)
+library(tidyverse)
+library(lme4)
+library(MASS)  
+library(data.table)
+library(Matrix)
+library(mice)
+ggplot2::theme_set(ggplot2::theme_bw())
+knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
+set.seed(123)
+```
+
+
+
+```{r}
+# Parameters
+H <- 5  # Number of sites
+m_hosp <- sample(50:75, H, replace = TRUE)  # Number of patients per site
+px <- 6  # Number of covariates
+p_bin <- 3  # Number of binary covariates
+p_cont <- px - p_bin  # Number of continuous covariates
+py <- 3 # Number of outcomes (multivariate)
+
+# Fixed effects
+beta <- matrix(runif(px*py, -3, 3), nrow = px, ncol = py)  # Fixed effects for covariates
+
+# Variance components
+sigma_u <- 0.5  # Site-level variance
+sigma_v_hosp <- runif(H, min = 0.5, max = 1)  # Varying sigma_v by hospital
+
+# Exchangeable correlation structure
+# --- Set pairwise correlations between outcomes (py = 3 here) ---
+rho12 <- -0.2   # corr(Y1, Y2)
+rho13 <- 0.4   # corr(Y1, Y3)
+rho23 <- 0.7   # corr(Y2, Y3)
+
+# Build 3x3 correlation matrix
+corr_mat <- matrix(c(
+  1,     rho12, rho13,
+  rho12, 1,     rho23,
+  rho13, rho23, 1
+), nrow = py, ncol = py, byrow = TRUE)
+
+# Ensure it's a valid correlation matrix (SPD with unit diagonal)
+if (min(eigen(corr_mat, symmetric = TRUE, only.values = TRUE)$values) <= 0) {
+  corr_mat <- as.matrix(nearPD(corr_mat, corr = TRUE)$mat)
+}
+
+# same residual SD for all outcomes, keep a scalar sigma_e:
+sigma_e <- 0.3
+sigma_e_vec <- rep(sigma_e, py)
+
+# (Optional) If want outcome-specific residual SDs instead, set them here:
+# sigma_e_vec <- c(0.4, 0.5, 0.35)  # example per-outcome SDs for Y1, Y2, Y3
+
+De <- diag(sigma_e_vec, py)
+Sigma_e <- De %*% corr_mat %*% De
+
+
+# Generate data
+nn <- rep(m_hosp, times = 1)  # Number of patients per hospital
+id.hosp <- rep(1:H, times = m_hosp)  # Hospital ID
+id.pat <- sequence(nn)  # Patient ID
+n_visits <- sample(1:20, sum(nn), replace = TRUE)  # Number of visits per patient
+
+# Expand hospital and patient IDs for visits
+id.visit <- sequence(n_visits)
+id.hosp.expanded <- rep(id.hosp, times = n_visits)
+id.pat.expanded <- rep(id.pat, times = n_visits)
+
+# Random effects
+u_h <- rnorm(H, mean = 0, sd = sigma_u)  # Hospital effects
+v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))  # Patient effects varying by hospital
+
+# Expansion of hospital effects
+u_h_patient <- rep(u_h, times = m_hosp)
+u_h_expanded <- rep(u_h_patient, times = n_visits)
+
+# Expansion of patient effects
+v_hi_expanded <- rep(v_hi, times = n_visits)
+
+# Covariates
+X_bin <- matrix(rbinom(sum(n_visits) * p_bin, size = 1, prob = 0.3), nrow = sum(n_visits), ncol = p_bin)
+X_cont <- matrix(rnorm(sum(n_visits) * p_cont, mean = 0, sd = 1), nrow = sum(n_visits), ncol = p_cont)
+X_hij <- cbind(X_bin, X_cont)  # Combine binary & continuous covariates
+
+
+# --- Generate multivariate residuals with non-exchangeable correlation ---
+epsilon_hij <- mvrnorm(n = sum(n_visits), mu = rep(0, py), Sigma = Sigma_e)
+
+# Compute outcomes
+Y_hij <- matrix(0, nrow = sum(n_visits), ncol = py)
+for (k in 1:py) {
+  Y_hij[, k] <- X_hij %*% beta[, k] + u_h_expanded + v_hi_expanded + epsilon_hij[, k]
+}
+
+# Create data table
+three_lvl_dat <- data.table(
+  site = id.hosp.expanded,
+  patient = id.pat.expanded,
+  visit = id.visit,
+  X_hij, Y_hij
+) %>% data.frame()
+
+data.table::setnames(three_lvl_dat, c("site", "patient", "visit", paste0("X", 1:px), paste0("Y", 1:py)))
+
+# Preprocessing
+visit_count <- three_lvl_dat %>%
+  dplyr::group_by(site, patient) %>%
+  dplyr::summarise(total_visits = n(), .groups = "drop")
+
+# Reorder data
+rearranged_data <- merge(three_lvl_dat, visit_count, by = c("site", "patient")) %>%
+  arrange(site, total_visits, patient) %>%
+  mutate(site = factor(site))
+```
+
+
+```{r}
+# Option 1: Introduce substantial missingness in Y_1 to Y_R
+# rearranged_data_with_missing <- rearranged_data
+# for(y_col in paste0("Y", 1:py)) {
+#   missing_indices <- sample(1:nrow(rearranged_data), 
+#                            size = round(nrow(rearranged_data) * missing_prob))
+#   rearranged_data_with_missing[missing_indices, y_col] <- NA
+# }
+
+# Option 2: Different missingness patterns for each outcome
+# rearranged_data_with_missing <- rearranged_data
+# rearranged_data_with_missing$Y1[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.2))] <- NA
+# rearranged_data_with_missing$Y2[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.3))] <- NA
+# rearranged_data_with_missing$Y3[sample(1:nrow(rearranged_data), round(nrow(rearranged_data)*0.6))] <- NA
+```
+
+
+```{r}
+# Option 3: MAR, missingness depends on other outcomes
+rearranged_data_with_missing <- rearranged_data
+n <- nrow(rearranged_data)
+
+# Step 1. Start with baseline missingness probabilities
+p1_base <- 0.2   # baseline for Y1
+p2_base <- 0.3   # baseline for Y2
+p3_base <- 0.5   # baseline for Y3
+
+# Step 2. For Y3: missingness depends on whether Y1 and Y2 are observed
+# If both Y1 and Y2 are observed -> Y3 more likely missing
+Y3_miss_prob <- ifelse(!is.na(rearranged_data$Y1) & !is.na(rearranged_data$Y2), 
+                       p3_base + 0.2,  # boost missingness
+                       p3_base - 0.2)  # lower missingness
+Y3_miss_prob <- pmin(pmax(Y3_miss_prob, 0), 1)
+Y3_missing <- rbinom(n, 1, Y3_miss_prob) == 1
+rearranged_data_with_missing$Y3[Y3_missing] <- NA
+
+# Step 3. For Y1 and Y2: missingness depends on whether Y3 is observed
+# If Y3 is observed → Y1/Y2 more likely missing
+Y1_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
+                       p1_base + 0.2, 
+                       p1_base - 0.1)
+Y2_miss_prob <- ifelse(!is.na(rearranged_data_with_missing$Y3),
+                       p2_base + 0.2, 
+                       p2_base - 0.1)
+Y1_miss_prob <- pmin(pmax(Y1_miss_prob, 0), 1)
+Y2_miss_prob <- pmin(pmax(Y2_miss_prob, 0), 1)
+
+Y1_missing <- rbinom(n, 1, Y1_miss_prob) == 1
+Y2_missing <- rbinom(n, 1, Y2_miss_prob) == 1
+
+rearranged_data_with_missing$Y1[Y1_missing] <- NA
+rearranged_data_with_missing$Y2[Y2_missing] <- NA
+
+# Ensure no cases where all Ys are missing
+all_y_missing <- apply(rearranged_data_with_missing[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
+num_all_missing <- sum(all_y_missing)
+
+if (num_all_missing > 0) {
+  cat("Found", num_all_missing, "cases where all Ys are missing. Fixing...\n")
+  
+  # For each case where all Ys are missing, randomly select one Y to be observed
+  for (i in which(all_y_missing)) {
+    y_to_keep <- sample(paste0("Y", 1:py), 1)
+    rearranged_data_with_missing[i, y_to_keep] <- rearranged_data[i, y_to_keep]
+  }
+}
+
+# Check the missingness pattern
+cat("Missingness summary:\n")
+print(sapply(rearranged_data_with_missing[paste0("Y", 1:py)], function(x) mean(is.na(x))))
+mice::md.pattern(rearranged_data_with_missing[,paste0("Y",1:py)])
+
+
+# Verify no cases have all Ys missing
+all_y_still_missing <- apply(rearranged_data_with_missing[, paste0("Y", 1:py), drop = FALSE], 1, function(x) all(is.na(x)))
+cat("Number of cases with all Ys missing:", sum(all_y_still_missing), "\n")
+
+# Check final dataset
+cat("\nDataset dimensions:", dim(rearranged_data_with_missing), "\n")
+cat("Complete cases:", sum(complete.cases(rearranged_data_with_missing)), "\n")
+cat("Percentage complete cases:", round(mean(complete.cases(rearranged_data_with_missing)) * 100, 2), "%\n")
+
+
+rearranged_data # full data
+rearranged_data_with_missing # missing/observed data
+rearranged_data_with_missing_cc <- cc(rearranged_data_with_missing) # complete-case data
+
+# Combine all site-specific imputed datasets
+sites <- unique(rearranged_data_with_missing$site)
+imputed_datasets <- list()
+
+for(site_id in sites) {
+  site_data <- rearranged_data_with_missing[rearranged_data_with_missing$site == site_id, ]
+  imp_site <- mice(site_data, m = 5)
+  imputed_datasets[[as.character(site_id)]] <- mice::complete(imp_site)
+}
+rearranged_data_with_missing_mice <- do.call(rbind, imputed_datasets) # site-level imputed data
+
+# Alternatively, impute the entire dataset at once, but this is imputation at pooled level
+rearranged_data_with_missing_mice_full <- complete(mice(rearranged_data_with_missing, m = 5)) # full-data imputed data
+```
+
+```{r}
+source("MV-PEAL_Pattern.R")
+
+X_cols <- paste0("X", 1:px)
+Y_cols <- paste0("Y", 1:py)
+
+fit_mv_full_unstr <- peal.fit.RI_mv_patterns(
+      data         = rearranged_data,
+      X_cols       = X_cols,
+      Y_cols       = Y_cols,
+      site_col     = "site",
+      patient_col  = "patient",
+      corstr       = "unstructured",
+      reml         = TRUE,
+      verbose      = FALSE
+    )
+```
+
+
+```{r}
+source("MV-PEAL_Pattern.R")
+
+X_cols <- paste0("X", 1:px)
+Y_cols <- paste0("Y", 1:py)
+
+fit_mv_unstr <- peal.fit.RI_mv_patterns(
+      data         = rearranged_data_with_missing,
+      X_cols       = X_cols,
+      Y_cols       = Y_cols,
+      site_col     = "site",
+      patient_col  = "patient",
+      corstr       = "unstructured",
+      reml         = TRUE,
+      verbose      = FALSE
+    )
+```
+
+
+```{r}
+# true beta vs estimated beta
+cat("Fixed Effects (Beta):\n")
+cbind(
+"true" = c(beta) ,
+"est_full" = fit_mv_full_unstr$b,
+"est_miss" = fit_mv_unstr$b
+) %>% round(4)
+
+
+# true correlation vs estimated correlation
+cat("Residual Correlations:\n")
+cbind(
+"true" = c(rho12, rho13, rho23) ,
+"est_full" = fit_mv_full_unstr$Corr[lower.tri(fit_mv_full_unstr$Corr)],
+"est_miss" = fit_mv_unstr$Corr[lower.tri(fit_mv_unstr$Corr)]
+) %>% round(4)
+
+
+# true residual SD vs estimated residual SD
+cat("Residual Standard Deviations:\n")
+cbind(
+"true" = rep(sigma_e, py) ,
+"est_full" = sqrt(diag(fit_mv_full_unstr$Sigma_e)),
+"est_miss" = sqrt(diag(fit_mv_unstr$Sigma_e))
+) %>% round(4)
+
+# true variance components vs estimated variance components
+cat("Variance Components:\n")
+cbind(
+"true" = c(sigma_u, sigma_v_hosp) ,
+"est_full" = sqrt(
+fit_mv_full_unstr$theta * fit_mv_full_unstr$s2
+),
+"est_miss" = sqrt(
+fit_mv_unstr$theta * fit_mv_unstr$s2
+)
+) %>% round(4)
+```
+

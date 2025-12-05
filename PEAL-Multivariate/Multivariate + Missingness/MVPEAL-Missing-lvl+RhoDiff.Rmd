@@ -37,9 +37,9 @@ sigma_v_hosp <- runif(H, min = 0.4, max = 0.7)  # Varying sigma_v by hospital
 
 # Exchangeable correlation structure
 # --- Set pairwise correlations between outcomes (py = 3 here) ---
-rho12 <- 0.15   # corr(Y1, Y2)
-rho13 <- 0.20   # corr(Y1, Y3)
-rho23 <- 0.60   # corr(Y2, Y3)
+rho12 <- -0.6   # corr(Y1, Y2)
+rho13 <- -0.65   # corr(Y1, Y3)
+rho23 <- 0.7   # corr(Y2, Y3)
 
 # Build 3x3 correlation matrix
 corr_mat <- matrix(c(
@@ -256,23 +256,55 @@ fit_mv_unstr <- peal.fit.RI_mv(
 ```
 
 ```{r}
-source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern.R")
-fit_missing_unstr1 <- peal.fit.RI_mv_patterns(
-  data = rearranged_data_with_missing,
-  X_cols = X_cols, Y_cols = Y_cols,
-  site_col = "site", patient_col = "patient",
-  corstr = "unstructured",
-  reml = TRUE, verbose = TRUE
-)
+# source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern.R")
+# fit_missing_unstr1 <- peal.fit.RI_mv_patterns(
+#   data = rearranged_data_with_missing,
+#   X_cols = X_cols, Y_cols = Y_cols,
+#   site_col = "site", patient_col = "patient",
+#   corstr = "unstructured",
+#   reml = TRUE, verbose = TRUE
+# )
 
 source("PEAL_Engine_Missing_Multi_RI_Rho_Pattern2.R")
-fit_missing_unstr2 <- peal.fit.RI_mv_patterns(
+fit_missing_un <- peal.fit.RI_mv_patterns(
   data = rearranged_data_with_missing,
   X_cols = X_cols, Y_cols = Y_cols,
   site_col = "site", patient_col = "patient",
   corstr = "unstructured",
   reml = TRUE, verbose = TRUE
 )
+fit_missing_in <- peal.fit.RI_mv_patterns(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr = "independence",
+  reml = TRUE, verbose = TRUE
+)
+fit_missing_ex <- peal.fit.RI_mv_patterns(
+  data = rearranged_data_with_missing,
+  X_cols = X_cols, Y_cols = Y_cols,
+  site_col = "site", patient_col = "patient",
+  corstr = "exchangeable",
+  reml = TRUE, verbose = TRUE
+)
+```
+
+
+```{r}
+
+sigma_e^2
+fit_missing_un$s2
+fit_missing_in$s2
+fit_missing_ex$s2
+
+fit_missing_un$Corr
+
+cbind(
+"true" = c(sigma_u, sigma_v_hosp) ,
+"unstr_missing" = sqrt(fit_missing_un$theta * fit_missing_un$s2),
+"indep_missing" = sqrt(fit_missing_in$theta * fit_missing_in$s2),
+"excha_missing" = sqrt(fit_missing_ex$theta * fit_missing_ex$s2)
+) %>% round(4)
 ```
 
 
@@ -638,6 +670,4 @@ cbind(
 "unstr_em_missing" = sqrt(fit_missing_em_unstr$history$init$theta * fit_missing_em_unstr$history$init$s2)
 ) %>% round(4)
 ```
-
-
 
