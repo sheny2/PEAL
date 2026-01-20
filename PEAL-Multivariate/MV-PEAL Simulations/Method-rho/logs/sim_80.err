@@ -1,0 +1,12 @@
+Loading R/4.3
+Loading required package: foreach
+Loading required package: iterators
+Fatal error: cannot create 'R_TempDir'
+Fatal error: cannot create 'R_TempDir'
+Fatal error: cannot create 'R_TempDir'
+Fatal error: cannot create 'R_TempDir'
+Fatal error: cannot create 'R_TempDir'
+Error in makePSOCKcluster(names = spec, ...) : 
+  Cluster setup failed. 5 of 5 workers failed to connect.
+Calls: makeCluster -> makePSOCKcluster
+Execution halted

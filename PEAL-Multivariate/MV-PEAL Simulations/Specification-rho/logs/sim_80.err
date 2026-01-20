@@ -1,0 +1,6 @@
+Loading R/4.3
+Loading required package: foreach
+Loading required package: iterators
+Warning message:
+In e$fun(obj, substitute(ex), parent.frame(), e$data) :
+  already exporting variable(s): rho_grid, scen_labels, N_reps_per_scen, H, px, py, p_bin, p_cont, beta_true, sigma_u, sigma_v_hosp, sigma_e

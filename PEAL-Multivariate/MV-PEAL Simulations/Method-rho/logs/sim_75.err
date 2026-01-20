@@ -1,0 +1,7 @@
+Loading R/4.3
+Loading required package: foreach
+Loading required package: iterators
+Error in checkForRemoteErrors(lapply(cl, recvResult)) : 
+  5 nodes produced errors; first error: file io error: '/tmp/RtmpaosdLl/sourceCpp-x86_64-conda-linux-gnu-1.0.11/sourcecpp_3c8aeb18bc0d/peal_core.cpp'
+Calls: clusterEvalQ -> clusterCall -> checkForRemoteErrors
+Execution halted

@@ -1,0 +1,7 @@
+Loading R/4.3
+Loading required package: foreach
+Loading required package: iterators
+Error in serverSocket(port = port) : 
+  creation of server socket failed: port 11939 cannot be opened
+Calls: makeCluster -> makePSOCKcluster -> serverSocket
+Execution halted

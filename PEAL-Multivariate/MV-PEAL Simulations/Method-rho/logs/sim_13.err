@@ -1,0 +1,4 @@
+Loading R/4.3
+Loading required package: foreach
+Loading required package: iterators
+slurmstepd: error: *** JOB 26884243 ON compute-111 CANCELLED AT 2026-01-18T12:18:55 ***
