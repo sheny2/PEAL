@@ -143,6 +143,7 @@ final_batch_df <- foreach(global_sim_id = start_idx:end_idx,
                               is_na <- rbinom(N_obs, 1, pmiss)
                               dat_miss[is_na==1, Y_cols[j]] <- NA
                             }
+                            colMeans(is.na(dat_miss[, Y_cols]))
                             
                             # -------------------------------------------------------------
                             # DEFINE THE FOUR APPROACHES

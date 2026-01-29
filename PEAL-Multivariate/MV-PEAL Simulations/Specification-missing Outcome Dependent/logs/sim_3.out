@@ -1,0 +1,213 @@
+------------------------------------------------
+Job ID: 27124922
+Array Task ID: 3
+CPUs allocated: 5
+------------------------------------------------
+Task 3: Detected 5 available cores. Initializing cluster...
+[[1]]
+[[1]]$value
+function (data, X_cols, Y_cols, site_col = "site", patient_col = "patient", 
+    weights = NULL, corstr = c("exchangeable", "independence", 
+        "unstructured"), reml = TRUE, verbose = TRUE, use_rcpp = TRUE) 
+{
+    corstr <- match.arg(corstr)
+    t0 <- Sys.time()
+    if (use_rcpp) {
+        if (!is.null(weights)) {
+            warning("Weights are not supported in the C++ implementation. Ignoring weights or switch use_rcpp=FALSE.")
+        }
+        if (!exists("get_summaries_fast_cpp")) {
+            stop("C++ backend not loaded. Ensure 'peal_core.cpp' is present and compiled, or set use_rcpp=FALSE.")
+        }
+        result <- peal.fit.cpp(data, X_cols, Y_cols, site_col, 
+            patient_col, corstr, reml, verbose)
+        result$method <- "Rcpp (Analytic Gradient)"
+    }
+    else {
+        if (verbose) 
+            cat("Using Pure R implementation...\n")
+        result <- peal.fit.R(data, X_cols, Y_cols, site_col, 
+            patient_col, weights, reml, corstr, verbose = verbose)
+        result$b.sd <- sqrt(diag(solve(result$opt$hessian)))
+        result$method <- "R (no Rcpp)"
+    }
+    if (verbose) 
+        cat(ifelse(all(result$opt$convergence == 0, eigen(result$opt$hessian)$value > 
+            0), "Convergence Reached", "Non-convergence!"), "and", 
+            ifelse(all(eigen(result$opt$hessian)$value > 0), 
+                "Hessian PD", "Hessian not PD"), "\n", "The number of function evaluations used is", 
+            result$opt$counts[1], "\n")
+    result$time <- Sys.time() - t0
+    return(result)
+}
+
+[[1]]$visible
+[1] FALSE
+
+
+[[2]]
+[[2]]$value
+function (data, X_cols, Y_cols, site_col = "site", patient_col = "patient", 
+    weights = NULL, corstr = c("exchangeable", "independence", 
+        "unstructured"), reml = TRUE, verbose = TRUE, use_rcpp = TRUE) 
+{
+    corstr <- match.arg(corstr)
+    t0 <- Sys.time()
+    if (use_rcpp) {
+        if (!is.null(weights)) {
+            warning("Weights are not supported in the C++ implementation. Ignoring weights or switch use_rcpp=FALSE.")
+        }
+        if (!exists("get_summaries_fast_cpp")) {
+            stop("C++ backend not loaded. Ensure 'peal_core.cpp' is present and compiled, or set use_rcpp=FALSE.")
+        }
+        result <- peal.fit.cpp(data, X_cols, Y_cols, site_col, 
+            patient_col, corstr, reml, verbose)
+        result$method <- "Rcpp (Analytic Gradient)"
+    }
+    else {
+        if (verbose) 
+            cat("Using Pure R implementation...\n")
+        result <- peal.fit.R(data, X_cols, Y_cols, site_col, 
+            patient_col, weights, reml, corstr, verbose = verbose)
+        result$b.sd <- sqrt(diag(solve(result$opt$hessian)))
+        result$method <- "R (no Rcpp)"
+    }
+    if (verbose) 
+        cat(ifelse(all(result$opt$convergence == 0, eigen(result$opt$hessian)$value > 
+            0), "Convergence Reached", "Non-convergence!"), "and", 
+            ifelse(all(eigen(result$opt$hessian)$value > 0), 
+                "Hessian PD", "Hessian not PD"), "\n", "The number of function evaluations used is", 
+            result$opt$counts[1], "\n")
+    result$time <- Sys.time() - t0
+    return(result)
+}
+
+[[2]]$visible
+[1] FALSE
+
+
+[[3]]
+[[3]]$value
+function (data, X_cols, Y_cols, site_col = "site", patient_col = "patient", 
+    weights = NULL, corstr = c("exchangeable", "independence", 
+        "unstructured"), reml = TRUE, verbose = TRUE, use_rcpp = TRUE) 
+{
+    corstr <- match.arg(corstr)
+    t0 <- Sys.time()
+    if (use_rcpp) {
+        if (!is.null(weights)) {
+            warning("Weights are not supported in the C++ implementation. Ignoring weights or switch use_rcpp=FALSE.")
+        }
+        if (!exists("get_summaries_fast_cpp")) {
+            stop("C++ backend not loaded. Ensure 'peal_core.cpp' is present and compiled, or set use_rcpp=FALSE.")
+        }
+        result <- peal.fit.cpp(data, X_cols, Y_cols, site_col, 
+            patient_col, corstr, reml, verbose)
+        result$method <- "Rcpp (Analytic Gradient)"
+    }
+    else {
+        if (verbose) 
+            cat("Using Pure R implementation...\n")
+        result <- peal.fit.R(data, X_cols, Y_cols, site_col, 
+            patient_col, weights, reml, corstr, verbose = verbose)
+        result$b.sd <- sqrt(diag(solve(result$opt$hessian)))
+        result$method <- "R (no Rcpp)"
+    }
+    if (verbose) 
+        cat(ifelse(all(result$opt$convergence == 0, eigen(result$opt$hessian)$value > 
+            0), "Convergence Reached", "Non-convergence!"), "and", 
+            ifelse(all(eigen(result$opt$hessian)$value > 0), 
+                "Hessian PD", "Hessian not PD"), "\n", "The number of function evaluations used is", 
+            result$opt$counts[1], "\n")
+    result$time <- Sys.time() - t0
+    return(result)
+}
+
+[[3]]$visible
+[1] FALSE
+
+
+[[4]]
+[[4]]$value
+function (data, X_cols, Y_cols, site_col = "site", patient_col = "patient", 
+    weights = NULL, corstr = c("exchangeable", "independence", 
+        "unstructured"), reml = TRUE, verbose = TRUE, use_rcpp = TRUE) 
+{
+    corstr <- match.arg(corstr)
+    t0 <- Sys.time()
+    if (use_rcpp) {
+        if (!is.null(weights)) {
+            warning("Weights are not supported in the C++ implementation. Ignoring weights or switch use_rcpp=FALSE.")
+        }
+        if (!exists("get_summaries_fast_cpp")) {
+            stop("C++ backend not loaded. Ensure 'peal_core.cpp' is present and compiled, or set use_rcpp=FALSE.")
+        }
+        result <- peal.fit.cpp(data, X_cols, Y_cols, site_col, 
+            patient_col, corstr, reml, verbose)
+        result$method <- "Rcpp (Analytic Gradient)"
+    }
+    else {
+        if (verbose) 
+            cat("Using Pure R implementation...\n")
+        result <- peal.fit.R(data, X_cols, Y_cols, site_col, 
+            patient_col, weights, reml, corstr, verbose = verbose)
+        result$b.sd <- sqrt(diag(solve(result$opt$hessian)))
+        result$method <- "R (no Rcpp)"
+    }
+    if (verbose) 
+        cat(ifelse(all(result$opt$convergence == 0, eigen(result$opt$hessian)$value > 
+            0), "Convergence Reached", "Non-convergence!"), "and", 
+            ifelse(all(eigen(result$opt$hessian)$value > 0), 
+                "Hessian PD", "Hessian not PD"), "\n", "The number of function evaluations used is", 
+            result$opt$counts[1], "\n")
+    result$time <- Sys.time() - t0
+    return(result)
+}
+
+[[4]]$visible
+[1] FALSE
+
+
+[[5]]
+[[5]]$value
+function (data, X_cols, Y_cols, site_col = "site", patient_col = "patient", 
+    weights = NULL, corstr = c("exchangeable", "independence", 
+        "unstructured"), reml = TRUE, verbose = TRUE, use_rcpp = TRUE) 
+{
+    corstr <- match.arg(corstr)
+    t0 <- Sys.time()
+    if (use_rcpp) {
+        if (!is.null(weights)) {
+            warning("Weights are not supported in the C++ implementation. Ignoring weights or switch use_rcpp=FALSE.")
+        }
+        if (!exists("get_summaries_fast_cpp")) {
+            stop("C++ backend not loaded. Ensure 'peal_core.cpp' is present and compiled, or set use_rcpp=FALSE.")
+        }
+        result <- peal.fit.cpp(data, X_cols, Y_cols, site_col, 
+            patient_col, corstr, reml, verbose)
+        result$method <- "Rcpp (Analytic Gradient)"
+    }
+    else {
+        if (verbose) 
+            cat("Using Pure R implementation...\n")
+        result <- peal.fit.R(data, X_cols, Y_cols, site_col, 
+            patient_col, weights, reml, corstr, verbose = verbose)
+        result$b.sd <- sqrt(diag(solve(result$opt$hessian)))
+        result$method <- "R (no Rcpp)"
+    }
+    if (verbose) 
+        cat(ifelse(all(result$opt$convergence == 0, eigen(result$opt$hessian)$value > 
+            0), "Convergence Reached", "Non-convergence!"), "and", 
+            ifelse(all(eigen(result$opt$hessian)$value > 0), 
+                "Hessian PD", "Hessian not PD"), "\n", "The number of function evaluations used is", 
+            result$opt$counts[1], "\n")
+    result$time <- Sys.time() - t0
+    return(result)
+}
+
+[[5]]$visible
+[1] FALSE
+
+
+Task 3 running global simulations 201 to 300 in parallel
+Saved batch of 100 simulations to: results/res_batch_3.rds 
