@@ -15,7 +15,7 @@ library(Matrix)
 library(mice)
 ggplot2::theme_set(ggplot2::theme_bw())
 knitr::opts_chunk$set(out.width = "100%", fig.align = 'center')
-# set.seed(123)
+set.seed(2026)
 source("MV-PEAL.R")
 ```
 
@@ -143,9 +143,29 @@ sum(is.na(rearranged_data_miss[, Y_names]))/(nrow(rearranged_data_miss) * length
 ```
 
 
+```{r}
+sim_data <- list(
+  full_data = rearranged_data,
+  observed_data = rearranged_data_miss,
+  parameters = list(
+    beta = beta,
+    sigma_u = sigma_u,
+    sigma_v_hosp = sigma_v_hosp,
+    sigma_e = sigma_e,
+    rho_true_vec = rho_true_vec
+  )
+)
+saveRDS(sim_data, file = "simulated_mv_data.rds")
+
+
+mv_dat <- sim_data$observed_data
+
+head(mv_dat)
+```
+
 
 ```{r}
-# --- 2. Fit Model (Unstructured) ---
+# --- 2. Fit Model (Unstructured) of full data ---
 fit_mv <- peal.fit(
     data = rearranged_data,
     X_cols = X_names,
@@ -172,7 +192,7 @@ cbind(rho_true_vec, rhos_est)
 
 
 ```{r}
-# --- 2. Fit Model (Unstructured) ---
+# --- 2. Fit Model (Unstructured) --- results should agree with full data 
 fit_mv <- peal.fit(
     data = rearranged_data_miss,
     X_cols = X_names,
