@@ -9,6 +9,8 @@ MV-PEAL is specifically built to address real-world data challenges, such as Mis
 
 * Computational Efficiency: Utilizes Rcpp integration (`peal_core.cpp`) for high-performance matrix operations.
 
+[MV-PEAL_pipeline.pdf](https://github.com/user-attachments/files/26573464/MV-PEAL_pipeline.pdf)
+
 
 ##  Setup and Requirements
 To use the MV-PEAL engine, ensure you have the following files in your working directory:
