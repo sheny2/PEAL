@@ -36,9 +36,36 @@ head(mv_dat)
 data preview is like
 | site | patient | visit | X1 | X2 | Y1 | Y2 | Y3 | total_visits |
 |---|---|---|---|---|---|---|---|---|
-1	|1	|4	|1	|1	|-1.6815387	|1.127510	|-3.806824	|-9.609663	|2
-2	|1	|4	|2	|0	|-1.6632470	|10.544026	|-1.232500	|NA	|2
-3	|1	|12	|1	|1	|0.6766099	|-12.698192	|NA	|NA	|2
-4	|1	|12	|2	|0	|1.0738382	|-4.701681	|NA	|NA	|2
-5	|1	|25	|1	|1	|0.7611508	|-12.991691	|1.794230	|15.056124	|2
-6	|1	|25	|2	|0	|-0.1535701	|2.291546	|1.723773	|NA	|2
+|1	|4	|1	|1	|-1.6815387	|1.127510	|-3.806824	|-9.609663	|2
+|1	|4	|2	|0	|-1.6632470	|10.544026	|-1.232500	|NA	|2
+|1	|12	|1	|1	|0.6766099	|-12.698192	|NA	|NA	|2
+|1	|12	|2	|0	|1.0738382	|-4.701681	|NA	|NA	|2
+|1	|25	|1	|1	|0.7611508	|-12.991691	|1.794230	|15.056124	|2
+|1	|25	|2	|0	|-0.1535701	|2.291546	|1.723773	|NA	|2
+
+
+
+### Part 2: Fitting the MV-PEAL Model
+The `peal.fit` function is the main interface. 
+It allows you to specify the fixed effects, multiple outcomes, and the correlation structure for the error terms.
+
+```r
+# Define column names
+X_names <- c("X1", "X2")
+Y_names <- c("Y1", "Y2", "Y3")
+
+# Fit the Multivariate Model
+fit_mv <- peal.fit(
+    data = mv_dat,
+    X_cols = X_names,
+    Y_cols = Y_names,
+    site_col = "site",
+    patient_col = "patient",
+    corstr = "unstructured", # Captures correlations between Y1, Y2, and Y3
+    reml = TRUE,
+    use_rcpp = TRUE          # Enables C++ acceleration
+)
+```
+
+
+
