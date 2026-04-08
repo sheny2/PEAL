@@ -69,5 +69,55 @@ fit_mv <- peal.fit(
 )
 ```
 
+### Part 3: Extracting Parameter Estimates
 
+Once the MV-PEAL model is fitted, you can extract various parameter estimates to understand the relationships between covariates and the multiple outcomes, as well as the underlying variance structures.
+
+3.1 Fixed Effects ($\beta$)
+
+The fixed effects represent the average relationship between your predictors ($X$) and each outcome ($Y$) across the entire population. In MV-PEAL, these are stored in the b component of the fit object.
+
+```r
+# Extract fixed effect coefficients
+fixed_effects <- fit_mv$b
+rownames(fixed_effects) <- X_names
+colnames(fixed_effects) <- Y_names
+
+print(fixed_effects)
+```
+
+3.2 Variance Components
+
+MV-PEAL decomposes the total variance into site-level, patient-level, and residual components. These are typically extracted as standard deviations ($\sigma$):
+
+* Site-level SD ($\sigma_u$): Captures variability between different clinical sites.
+
+* Patient-level SD ($\sigma_v$): Captures variability between patients within the same site.
+
+* Residual SD ($\sigma_e$): The remaining unexplained error for each outcome.
+
+```r
+# Site-level standard deviation (global)
+sigma_u_est <- sqrt(fit_mv$theta[1] * fit_mv$s2)
+
+# Patient-level standard deviations (per site)
+sigma_v_hosp_est <- sqrt(fit_mv$theta[2:(H+1)] * fit_mv$s2)
+
+# Residual standard deviation
+sigma_e_est <- sqrt(fit_mv$s2)
+```
+
+3.3 Outcome Correlations ($\rho$)
+
+A primary advantage of MV-PEAL is its ability to estimate how the different outcomes ($Y_1, Y_2, Y_3$) correlate with one another. 
+By using `corstr = "unstructured"`, you can extract the full correlation matrix.
+
+```r
+# Extract the correlation matrix between outcomes
+cor_matrix <- fit_mv$Corr
+rownames(cor_matrix) <- colnames(cor_matrix) <- Y_names
+
+# Extract specific pairwise correlations (e.g., Y2 and Y1, Y3 and Y1, Y3 and Y2)
+rhos_est <- c(cor_matrix[2, 1], cor_matrix[3, 1], cor_matrix[3, 2]) 
+```
 
