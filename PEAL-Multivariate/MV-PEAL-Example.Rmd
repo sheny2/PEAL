@@ -63,9 +63,6 @@ id.pat.expanded <- rep(id.pat, times = n_visits)
 u_h <- rnorm(H, mean = 0, sd = sigma_u) 
 u_h_expanded <- rep(rep(u_h, times = m_hosp), times = n_visits)
 
-# v_hi <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))
-# v_hi_expanded <- rep(v_hi, times = n_visits)
-
 v_hi_mat <- matrix(0, nrow = sum(nn), ncol = py)
 for(j in 1:py) {
   v_hi_mat[, j] <- rnorm(sum(nn), mean = 0, sd = rep(sigma_v_hosp, times = m_hosp))
@@ -122,8 +119,6 @@ gamma_1 <- 0.5  # Effect of X1
 gamma_2 <- 0.4  # Effect of X2
 
 # Define different intercepts for Y1, Y2, Y3 to control their specific missingness levels
-# Lower value (e.g., -3)  -> Low Missingness
-# Higher value (e.g., -1) -> High Missingness
 gamma_0_vec <- c(-2.5, -1.5, -0.5) 
 
 # Iterate through columns using an index to access the specific gamma_0
