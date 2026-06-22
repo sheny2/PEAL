@@ -1,5 +1,7 @@
 ## PEAL: Privacy-preserving Efficient Aggregation of Longitudinal Data
-This repository contains an R implementation of the PEAL (Privacy-preserving Efficient Aggregation of Longitudinal data) algorithm. PEAL is a novel, one-shot distributed algorithm designed to fit three-level linear mixed-effects models on longitudinal data without sharing individual patient data (IPD).
+This repository contains an R implementation of the PEAL (Privacy-preserving Efficient Aggregation of Longitudinal data) algorithm, 
+which has been published in [NPJ Digital Medicine](https://www.nature.com/articles/s41746-026-02861-6).
+PEAL is a novel, one-shot distributed algorithm designed to fit three-level linear mixed-effects models on longitudinal data without sharing individual patient data (IPD).
 
 The key features of PEAL are:
 
